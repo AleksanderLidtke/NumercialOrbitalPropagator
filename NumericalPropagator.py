@@ -39,7 +39,7 @@ def readEGM96Coefficients():
     
     " Parse C and S coefficients to an easily usable format. "
     # Store a list of coefficients corresponding to the given degree of len( no. orders corresponding to this degree ).
-    Ccoeffs = {1:[1]}; Scoeffs ={1:[0]}; # Initial coefficients for spherical Earth.
+    Ccoeffs = {0:[1],1:[0]}; Scoeffs ={0:[0],1:[0]}; # Initial coefficients for spherical Earth.
     for i in range(len(degrees)): # Initialise emoty lists.
         Ccoeffs[degrees[i]] = []
         Scoeffs[degrees[i]] = []
@@ -79,8 +79,6 @@ MagneticIndex = 40 # Daily magnetic index.
 satelliteMass = 1000. # kg
 Cd = 2.2 # Drag coefficient, dimensionless.
 dragArea = 5.0 # Area exposed to atmospheric drag, m2.
-state_0 = numpy.array([EarthRadius+500.0e3,0.,0.,0.,7784.,0.]) # Initial state vector with Cartesian positions and velocities in m and m/s.
-state_0[4] = numpy.sqrt( (GM+satelliteMass)/numpy.linalg.norm(state_0[:3]) ) # Assume we're starting from a circular orbit.
 
 def calculateDragAcceleration(stateVec, satMass):
     #    " Prepare the atmospheric density model inputs. "
@@ -96,6 +94,18 @@ def calculateDragAcceleration(stateVec, satMass):
     return dragForce/satMass
 
 def calculateGravityAcceleration(stateVec):
+    """ Calculate the acceleration due to gractiy acting on the satellite at
+    a given state (3 positions and 3 velocities).
+    Arguments
+    ----------
+    numpy.ndarray of shape (1,6) with three Cartesian positions and three velocities
+        in an inertial reference frame in metres and metres per second, respectively.
+    Returns
+    ----------
+    numpy.ndarray of shape (1,3) with three Cartesian components of the acceleration
+        in m/s2 given in an inertial reference frame.
+    """
+    #TODO need to change to Earth-fixed frame to compute the gravity acceleration, then back to inertial
     gravityAcceleration = -GM/stateVec[:3].dot(stateVec[:3]) * stateVec[:3]/numpy.linalg.norm(stateVec[:3])
     return gravityAcceleration
     
@@ -104,13 +114,14 @@ def computeRateOfChangeOfState(stateVector, epoch, satMass):
     Arguments
     ----------
     stateVector - numpy.ndarray of shape (1,6) with three Cartesian positions
-        and three velocities.
+        and three velocities given in an inertial frame of reference.
     epoch - float corresponding to the epoch at which the rate of change is to
         be computed.
     satMass - float corresponding to the satellite mass.
     Returns
     ----------
-    numpy.ndarray of shape (1,6) with the rates of change of position and velocity.
+    numpy.ndarray of shape (1,6) with the rates of change of position and velocity
+        in the same inertial frame as the one in which stateVector was given.
     """
     gravityAcceleration = calculateGravityAcceleration(stateVector) # A vector of the gravity force from EGM96 model.
     dragAcceleration = calculateDragAcceleration(stateVector, satMass) #  A vector of the drag computed with NRLMSISE-00.
@@ -139,13 +150,15 @@ def calculateCircularPeriod(stateVec):
     PROPAGATE THE ORBIT NUMERICALLY.
 ===============================================================================
 """
-state = state_0; # Instantaneous state vector.
-initialOrbitalPeriod = calculateCircularPeriod(state_0) # Initial orbital period.
+state_0 = numpy.array([EarthRadius+500.0e3,0.,0.,0.,0.,0.]) # Initial state vector with Cartesian positions and velocities in m and m/s.
+state_0[5] = numpy.sqrt( (GM+satelliteMass)/numpy.linalg.norm(state_0[:3]) ) # Assume we're starting from a circular orbit.
+initialOrbitalPeriod = calculateCircularPeriod(state_0) # Orbital period of the initial circular orbit.
 
 epochsOfInterest = numpy.arange(0, 10*initialOrbitalPeriod, 10) # Times at which the solution is to be computed. Same unit as the time unit of the accelerations and velocities (seconds).
-propagatedStates = scipy.integrate.odeint(computeRateOfChangeOfState, state, epochsOfInterest, args=(satelliteMass,)) # State vectors at the epochs of interest.
-altitudes = [ (numpy.linalg.norm(x[:3])-EarthRadius) for x in propagatedStates]
-specificEnergies = [ numpy.linalg.norm(x[3:])*numpy.linalg.norm(x[3:]) - GM*satelliteMass/numpy.linalg.norm(x[:3]) for x in propagatedStates]
+propagatedStates = scipy.integrate.odeint(computeRateOfChangeOfState, state_0, epochsOfInterest, args=(satelliteMass,)) # State vectors at the epochs of interest.
+
+altitudes = [ (numpy.linalg.norm(x[:3])-EarthRadius) for x in propagatedStates] # Altitudes above spherical Earth...
+specificEnergies = [ numpy.linalg.norm(x[3:])*numpy.linalg.norm(x[3:]) - GM*satelliteMass/numpy.linalg.norm(x[:3]) for x in propagatedStates] # ...and corresponding specific orbital energies.
 
 """
 ===============================================================================

@@ -44,7 +44,7 @@ degrees=map(int, degrees); orders=map(int, orders); CcoeffsTemp=map(float, Ccoef
 
 " Parse C and S coefficients to an easily usable format. "
 # Store a list of coefficients corresponding to the given degree of len( no. orders corresponding to this degree ).
-Ccoeffs = {1:[1]}; Scoeffs ={1:[0]}; # Initial coefficients for spherical Earth.
+Ccoeffs = {0:[1],1:[0]}; Scoeffs ={0:[0],1:[0]} # Initial coefficients for spherical Earth.
 for i in range(len(degrees)): # Initialise emoty lists.
     Ccoeffs[degrees[i]] = []
     Scoeffs[degrees[i]] = []
@@ -59,7 +59,7 @@ gravitationalPotentials = numpy.zeros( lats.shape ) # Gravitational potentials c
 
 for i in range(lats.shape[0]):
     for j in range(lats.shape[1]):
-        for degree in range(1, MAX_DEGREE+1): # Go through all the desired orders and compute the geoid corrections to the sphere.
+        for degree in range(0, MAX_DEGREE+1): # Go through all the desired orders and compute the geoid corrections to the sphere.
             temp = 0. # Contribution to the potential from the current degree and all corresponding orders.
             legendreCoeffs = scipy.special.legendre(degree) # Legendre polynomial coefficients corresponding to the current degree.
             for order in range(degree): # Go through all the orders corresponding to the currently evaluated degree.
