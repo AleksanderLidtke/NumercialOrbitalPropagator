@@ -48,7 +48,33 @@ def readEGM96Coefficients():
         Ccoeffs[degrees[i]].append( CcoeffsTemp[i] )
         Scoeffs[degrees[i]].append( ScoeffsTemp[i] )
         
-
+def RungeKutta4(X,t,dt,rateOfChangeFunction):
+    """ Use fourth-order Runge-Kutta numericla integration method to propagate
+    a system of differential equations from state X, expressed at time t, by a
+    time increment dt. Evolution of the sytstem is given by the rateOfChangeFunction
+    that gives the rates of change of all the components of state X.
+    Arguments
+    ----------
+    X - numpy.ndarray of shape (1,6) with three Cartesian positions and three velocities
+        in an inertial reference frame in metres and metres per second, respectively.
+    t - float, epoch at which state X is defined
+    dt - float, epoch increment to which the state X is to be propagated
+    rateOfChangeFunction - function that returns a numpy.ndarray of shape (1,3)
+        with three Cartesian components of the acceleration in m/s2 given in an
+        inertial reference frame. Its arguments are the state X and epoch t.
+    Returns
+    ----------
+    numpy.ndarray of shape (1,6) with three Cartesian positions and three velocities
+        in an inertial reference frame in metres and metres per second, respectively,
+        propagated to time t+dt.
+    """
+    dxdt = rateOfChangeFunction(X,t)
+    k0 = dt*dxdt
+    k1 = dt*rateOfChangeFunction(X+k0/2.,t+dt/2.)
+    k2 = dt*rateOfChangeFunction(X+k1/2.,t+dt/2.)
+    k3 = dt*rateOfChangeFunction(X+k2,t+dt)
+    return X + (k0+2.*k1+2.*k2+k3)/6.
+    
 """
 ===============================================================================
     PROBLEM SETUP.
@@ -109,7 +135,7 @@ def calculateGravityAcceleration(stateVec):
     gravityAcceleration = -GM/stateVec[:3].dot(stateVec[:3]) * stateVec[:3]/numpy.linalg.norm(stateVec[:3])
     return gravityAcceleration
     
-def computeRateOfChangeOfState(stateVector, epoch, satMass):
+def computeRateOfChangeOfState(stateVector, epoch):
     """ Compute the rate of change of the state vector.
     Arguments
     ----------
@@ -117,14 +143,13 @@ def computeRateOfChangeOfState(stateVector, epoch, satMass):
         and three velocities given in an inertial frame of reference.
     epoch - float corresponding to the epoch at which the rate of change is to
         be computed.
-    satMass - float corresponding to the satellite mass.
     Returns
     ----------
     numpy.ndarray of shape (1,6) with the rates of change of position and velocity
         in the same inertial frame as the one in which stateVector was given.
     """
     gravityAcceleration = calculateGravityAcceleration(stateVector) # A vector of the gravity force from EGM96 model.
-    dragAcceleration = calculateDragAcceleration(stateVector, satMass) #  A vector of the drag computed with NRLMSISE-00.
+    dragAcceleration = calculateDragAcceleration(stateVector, satelliteMass) #  A vector of the drag computed with NRLMSISE-00.
     
     stateDerivatives = numpy.zeros(6);
     stateDerivatives[:3] = stateVector[3:]; # Velocity is the rate of change of position.
@@ -150,13 +175,22 @@ def calculateCircularPeriod(stateVec):
     PROPAGATE THE ORBIT NUMERICALLY.
 ===============================================================================
 """
+" Initial conditions. "
 state_0 = numpy.array([EarthRadius+500.0e3,0.,0.,0.,0.,0.]) # Initial state vector with Cartesian positions and velocities in m and m/s.
 state_0[5] = numpy.sqrt( (GM+satelliteMass)/numpy.linalg.norm(state_0[:3]) ) # Assume we're starting from a circular orbit.
 initialOrbitalPeriod = calculateCircularPeriod(state_0) # Orbital period of the initial circular orbit.
 
-epochsOfInterest = numpy.arange(0, 10*initialOrbitalPeriod, 10) # Times at which the solution is to be computed. Same unit as the time unit of the accelerations and velocities (seconds).
-propagatedStates = scipy.integrate.odeint(computeRateOfChangeOfState, state_0, epochsOfInterest, args=(satelliteMass,)) # State vectors at the epochs of interest.
+" Propagation time settings. "
+INTEGRATION_TIME_STEP_S = 10.0 # Time step at which the trajectory will be propagated.
+epochsOfInterest = numpy.arange(0, 10*initialOrbitalPeriod, INTEGRATION_TIME_STEP_S) # Times at which the solution is to be computed. Same unit as the time unit of the accelerations and velocities (seconds).
+propagatedStates = numpy.zeros( (epochsOfInterest.shape[0],6) ) # State vectors at the  epochs of interest.
 
+" Actual numerical propagation main loop. "
+propagatedStates[0,:] = state_0 # Apply the initial condition.
+for i in range(1,epochsOfInterest.shape[0]): # Propagate the state to all the desired epochs statring from state_0.
+    propagatedStates[i,:] = RungeKutta4(propagatedStates[i-1], epochsOfInterest[i-1], INTEGRATION_TIME_STEP_S, computeRateOfChangeOfState)
+
+" Compute quantities derived from the porpagated state vectors. "
 altitudes = [ (numpy.linalg.norm(x[:3])-EarthRadius) for x in propagatedStates] # Altitudes above spherical Earth...
 specificEnergies = [ numpy.linalg.norm(x[3:])*numpy.linalg.norm(x[3:]) - GM*satelliteMass/numpy.linalg.norm(x[:3]) for x in propagatedStates] # ...and corresponding specific orbital energies.
 
@@ -208,7 +242,7 @@ ax2.set_ylabel(r"$Altitude\ above\ spherical\ Earth\ (m)$", fontsize=labelsFontS
 ax2_2.set_ylabel(r"$Specific\ orbital\ energy\ (m^2 s^{-2})$", fontsize=labelsFontSize)
 ax2.grid(True, which='both')
 
-altPlot=ax2.plot(epochsOfInterest, altitudes, c='r', lw=4)
-enPlot=ax2_2.plot(epochsOfInterest, specificEnergies, c='b', lw=4)
+ax2.plot(epochsOfInterest, altitudes, c='r', lw=4, ls='-')
+ax2_2.plot(epochsOfInterest, specificEnergies, c='b', lw=4, ls='-')
 
 fig2.show()
