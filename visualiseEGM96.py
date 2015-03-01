@@ -28,7 +28,7 @@ N_POINTS = 50 # Number of lattitudes and longitudes used to plot the geoid.
 latitudes = numpy.linspace(0, 2*numpy.pi, N_POINTS) # Geocentric latitudes and longitudes where the geoid will be visualised.
 longitudes = numpy.linspace(0, numpy.pi, N_POINTS)
 radius = 6378136.3 # Radius at which the equipotential will be computed, m.
-MAX_DEGREE = 2 # Maximum degree of the geopotential to visualise.
+MAX_DEGREE = 4 # Maximum degree of the geopotential to visualise.
 
 " Read the coefficients. "
 degrees = []; orders = []; CcoeffsTemp = []; ScoeffsTemp = [];
@@ -67,7 +67,7 @@ for i in range(lats.shape[0]):
             
             gravitationalPotentials[i,j] += math.pow(a/radius, degree) * temp # Add the contribution from the current degree.
         
-gravitationalPotentials *= GM/radius # Final correction.
+gravitationalPotentials *= -GM/radius # Final correction.
 
 """
 ===============================================================================
