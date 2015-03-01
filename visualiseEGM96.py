@@ -28,7 +28,7 @@ N_POINTS = 50 # Number of lattitudes and longitudes used to plot the geoid.
 latitudes = numpy.linspace(0, 2*numpy.pi, N_POINTS) # Geocentric latitudes and longitudes where the geoid will be visualised.
 longitudes = numpy.linspace(0, numpy.pi, N_POINTS)
 radius = 6378136.3 # Radius at which the equipotential will be computed, m.
-MAX_DEGREE = 4 # Maximum degree of the geopotential to visualise.
+MAX_DEGREE = 2 # Maximum degree of the geopotential to visualise.
 
 " Read the coefficients. "
 degrees = []; orders = []; CcoeffsTemp = []; ScoeffsTemp = [];
@@ -44,7 +44,7 @@ degrees=map(int, degrees); orders=map(int, orders); CcoeffsTemp=map(float, Ccoef
 
 " Parse C and S coefficients to an easily usable format. "
 # Store a list of coefficients corresponding to the given degree of len( no. orders corresponding to this degree ).
-Ccoeffs = {0:[1],1:[0]}; Scoeffs ={0:[0],1:[0]} # Initial coefficients for spherical Earth.
+Ccoeffs = {0:[1],1:[0,0]}; Scoeffs ={0:[0],1:[0,0]} # Initial coefficients for spherical Earth.
 for i in range(len(degrees)): # Initialise emoty lists.
     Ccoeffs[degrees[i]] = []
     Scoeffs[degrees[i]] = []
@@ -62,9 +62,11 @@ for i in range(lats.shape[0]):
         for degree in range(0, MAX_DEGREE+1): # Go through all the desired orders and compute the geoid corrections to the sphere.
             temp = 0. # Contribution to the potential from the current degree and all corresponding orders.
             legendreCoeffs = scipy.special.legendre(degree) # Legendre polynomial coefficients corresponding to the current degree.
-            for order in range(degree): # Go through all the orders corresponding to the currently evaluated degree.
-                temp += legendreCoeffs[order] * numpy.cos(lats[i,j]) * (Ccoeffs[degree][order]*numpy.cos( order*longs[i,j] ) + Scoeffs[degree][order]*numpy.sin( order*longs[i,j] ))
-            
+            for order in range(degree+1): # Go through all the orders corresponding to the currently evaluated degree.
+                if (abs(lats[i,j]-math.pi/2.) <= 1E-16) or (abs(lats[i,j]-3*math.pi/2.) <= 1E-16): # We're at the equator, cos(colatitude) will be zero and things will break.
+                    temp += legendreCoeffs[order] *          1.0         * (Ccoeffs[degree][order]*numpy.cos( order*longs[i,j] ) + Scoeffs[degree][order]*numpy.sin( order*longs[i,j] ))
+                else:
+                    temp += legendreCoeffs[order] * numpy.cos(lats[i,j]) * (Ccoeffs[degree][order]*numpy.cos( order*longs[i,j] ) + Scoeffs[degree][order]*numpy.sin( order*longs[i,j] ))
             gravitationalPotentials[i,j] += math.pow(a/radius, degree) * temp # Add the contribution from the current degree.
         
 gravitationalPotentials *= -GM/radius # Final correction.

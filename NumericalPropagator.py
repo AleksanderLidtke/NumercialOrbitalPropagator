@@ -175,7 +175,7 @@ def calculateGravityAcceleration(stateVec, epoch):
         temp = 0. # Contribution to the potential from the current degree and all corresponding orders.
         legendreCoeffs = scipy.special.legendre(degree) # Legendre polynomial coefficients corresponding to the current degree.
         for order in range(degree+1): # Go through all the orders corresponding to the currently evaluated degree.
-            if (colatitude-math.pi/2. <= 1E-16) or (colatitude-3*math.pi/2. <= 1E-16): # We're at the equator, cos(colatitude) will be zero and things will break.
+            if (abs(colatitude-math.pi/2. <= 1E-16)) or (abs(colatitude-3*math.pi/2. <= 1E-16)): # We're at the equator, cos(colatitude) will be zero and things will break.
                 temp += legendreCoeffs[order] *         1.0          * (Ccoeffs[degree][order]*math.cos( order*longitude ) + Scoeffs[degree][order]*math.sin( order*longitude ))
             else:
                 temp += legendreCoeffs[order] * math.cos(colatitude) * (Ccoeffs[degree][order]*math.cos( order*longitude ) + Scoeffs[degree][order]*math.sin( order*longitude ))
@@ -252,7 +252,7 @@ initialOrbitalPeriod = calculateCircularPeriod(state_0) # Orbital period of the 
     
 " Propagation time settings. "
 INTEGRATION_TIME_STEP_S = 10.0 # Time step at which the trajectory will be propagated.
-epochsOfInterest = numpy.arange(0, 1000*initialOrbitalPeriod, INTEGRATION_TIME_STEP_S) # Times at which the solution is to be computed. Same unit as the time unit of the accelerations and velocities (seconds).
+epochsOfInterest = numpy.arange(0, 10*initialOrbitalPeriod, INTEGRATION_TIME_STEP_S) # Times at which the solution is to be computed. Same unit as the time unit of the accelerations and velocities (seconds).
 propagatedStates = numpy.zeros( (epochsOfInterest.shape[0],6) ) # State vectors at the  epochs of interest.
 
 " Actual numerical propagation main loop. "
@@ -316,3 +316,25 @@ ax2.plot(epochsOfInterest, altitudes, c='r', lw=4, ls='-')
 ax2_2.plot(epochsOfInterest, specificEnergies, c='b', lw=4, ls='-')
 
 fig2.show()
+
+"""
+===============================================================================
+    FIGURE SHOWING EVOLUTION OF THE POSITION COMPONENTS OVER TIME.
+===============================================================================
+"""
+fig3, axarr = matplotlib.pyplot.subplots(3, sharex=True)
+axarr[0].grid(linewidth=2); axarr[1].grid(linewidth=2); axarr[2].grid(linewidth=2);
+axarr[0].tick_params(axis='both',reset=False,which='both',length=5,width=1.5)
+axarr[1].tick_params(axis='both',reset=False,which='both',length=5,width=1.5)
+axarr[2].tick_params(axis='both',reset=False,which='both',length=5,width=1.5)
+
+axarr[2].set_xlabel(r'$Time\ elapsed\ (s)$',fontsize=labelsFontSize)
+axarr[0].set_ylabel(r'$X\ (m)$',fontsize=labelsFontSize)
+axarr[1].set_ylabel(r'$Y\ (m)$',fontsize=labelsFontSize)
+axarr[2].set_ylabel(r'$Z\ (m)$',fontsize=labelsFontSize)
+
+axarr[0].plot(epochsOfInterest, propagatedStates[:,0], c='r', lw=4, ls='-')
+axarr[1].plot(epochsOfInterest, propagatedStates[:,1], c='r', lw=4, ls='-')
+axarr[2].plot(epochsOfInterest, propagatedStates[:,2], c='r', lw=4, ls='-')
+
+fig3.show()
