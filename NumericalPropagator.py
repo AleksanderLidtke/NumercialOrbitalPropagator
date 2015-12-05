@@ -121,8 +121,9 @@ def calculateGeocentricLatLon(stateVec, epoch):
     inertial frame at a certain epoch.
     Arguments
     ----------
-    stateVec - numpy.ndarray of shape (1,6) with three Cartesian positions and three velocities
-        in an inertial reference frame in metres and metres per second, respectively.
+    stateVec - numpy.ndarray of shape (1,6) with three Cartesian positions and
+        three velocities in an inertial reference frame in metres and metres
+        per second, respectively.
     epoch - float with the UT epoch corresponding to the stateVect.
     Returns
     ----------
@@ -140,31 +141,54 @@ def calculateGeocentricLatLon(stateVec, epoch):
     return colat,lon,r
 
 def calculateDragAcceleration(stateVec, ecpoh, satMass):
+    """ Calculate the acceleration due to atmospheric draf acting on the
+    satellite at a given state (3 positions and 3 velocities) and epoch.
+    Use NRLMSISE2000 atmospheric model with globally defined solar activity
+    proxies:
+        F10_7A - 81-day average F10.7.
+        F10_7 - daily F10.7 for the previous day.
+        MagneticIndex - daily magnetic index AP.
+        NRLMSISEaph - nrlmsise_00_header.ap_array with magnetic values.#
+    
+    Arguments
+    ----------
+    numpy.ndarray of shape (1,6) with three Cartesian positions and three
+        velocities in an inertial reference frame in metres and metres per
+            second, respectively.
+    epoch - float corresponding to the epoch at which the rate of change is
+        to be computed.
+    Returns
+    ----------
+    numpy.ndarray of shape (1,3) with three Cartesian components of the
+        acceleration in m/s2 given in an inertial reference frame.
+    """
     #    " Prepare the atmospheric density model inputs. "
 #    #TODO - calculate the altitude, latitude, longitude
-#    altitude_km = numpy.linalg.norm(stateVector[:3])/1000.0
-#    NRLMSISEinput = nrlmsise_00_header.nrlmsise_input(year=0, doy=0, sec=0.0, alt=altitude_km, g_lat=0.0, g_long=0.0, lst=0.0, f107A=F10_7A, f107=F10_7, ap=MagneticIndex, ap_a=NRLMSISEaph)
-#    nrlmsise_00_header.lstCalc( NRLMSISEinput ) # Calculate the local solar time.
-#    
-#    " Use the calculated atmospheric density to compute the drag force. "
-#    NRLMSISEoutpt = nrlmsise_00_header.nrlmsise_output(); nrlmsise_00.gtd7(NRLMSISEinput, NRLMSISEflags, NRLMSISEoutpt);
-#    atmosphericDensity = NRLMSISEoutpt.d[5]/1000.0 # Change from gm/cm3 to kg/m3
-    dragForce = numpy.zeros(3) #-0.5*atmosphericDensity*dragArea*Cd* numpy.power(stateVector[3:],2)
+    altitude_km = numpy.linalg.norm(stateVec[:3])/1000.0 #TODO this isn't altitude in km, but radius in km. Is this OK?
+    NRLMSISEinput = nrlmsise_00_header.nrlmsise_input(year=0, doy=0, sec=0.0, alt=altitude_km, g_lat=0.0, g_long=0.0, lst=0.0, f107A=F10_7A, f107=F10_7, ap=MagneticIndex, ap_a=NRLMSISEaph)
+    nrlmsise_00_header.lstCalc( NRLMSISEinput ) # Calculate the local solar time.
+    
+    " Use the calculated atmospheric density to compute the drag force. "
+    NRLMSISEoutpt = nrlmsise_00_header.nrlmsise_output(); nrlmsise_00.gtd7(NRLMSISEinput, NRLMSISEflags, NRLMSISEoutpt);
+    atmosphericDensity = NRLMSISEoutpt.d[5]/1000.0 # Change from gm/cm3 to kg/m3
+    dragForce = -0.5*atmosphericDensity*dragArea*Cd* numpy.power(stateVec[3:],2) # Drag foce in Newtons.
     return dragForce/satMass
 
 def calculateGravityAcceleration(stateVec, epoch):
-    """ Calculate the acceleration due to gractiy acting on the satellite at
-    a given state (3 positions and 3 velocities).
+    """ Calculate the acceleration due to gravtiy acting on the satellite at
+    a given state (3 positions and 3 velocities). Ignore satellite's mass,
+    i.e. use a restricted two-body problem.
     Arguments
     ----------
-    numpy.ndarray of shape (1,6) with three Cartesian positions and three velocities
-        in an inertial reference frame in metres and metres per second, respectively.
-    epoch - float corresponding to the epoch at which the rate of change is to
-        be computed.
+    numpy.ndarray of shape (1,6) with three Cartesian positions and three
+        velocities in an inertial reference frame in metres and metres per
+            second, respectively.
+    epoch - float corresponding to the epoch at which the rate of change is
+        to be computed.
     Returns
     ----------
-    numpy.ndarray of shape (1,3) with three Cartesian components of the acceleration
-        in m/s2 given in an inertial reference frame.
+    numpy.ndarray of shape (1,3) with three Cartesian components of the
+        acceleration in m/s2 given in an inertial reference frame.
     """
     " Compute geocentric latitude and longitude. "
     colatitude,longitude,geocentricRadius = calculateGeocentricLatLon(stateVec, epoch)
@@ -185,7 +209,7 @@ def calculateGravityAcceleration(stateVec, epoch):
     gravitationalPotential *= GM/EarthRadius # Final correction.
 
     " Compute the acceleration due to the gravity potential at the given point. "
-    gravityAcceleration = gravitationalPotential/numpy.linalg.norm(stateVec[:3]) * -stateVec[:3]/numpy.linalg.norm(stateVec[:3]) # First divide by the radius to get the acceleration value, then get the direction (towards centre of the Earth).
+    gravityAcceleration = gravitationalPotential/numpy.linalg.norm(stateVec[:3]) * (-1.*stateVec[:3]/numpy.linalg.norm(stateVec[:3])) # First divide by the radius to get the acceleration value, then get the direction (towards centre of the Earth).
 
     return gravityAcceleration
     
@@ -195,8 +219,8 @@ def computeRateOfChangeOfState(stateVector, epoch):
     ----------
     stateVector - numpy.ndarray of shape (1,6) with three Cartesian positions
         and three velocities given in an inertial frame of reference.
-    epoch - float corresponding to the epoch at which the rate of change is to
-        be computed.
+    epoch - float corresponding to the epoch at which the rate of change is
+        to be computed.
     Returns
     ----------
     numpy.ndarray of shape (1,6) with the rates of change of position and velocity
@@ -230,26 +254,29 @@ def calculateCircularPeriod(stateVec):
 ===============================================================================
 """
 " Initial conditions. "
-state_0 = numpy.array([EarthRadius,0.,0.,0.,0.,0.]) # Initial state vector with Cartesian positions and velocities in m and m/s.
+state_0 = numpy.array([EarthRadius+500.0e3,0.,0.,0.,0.,0.]) # Initial state vector with Cartesian positions and velocities in m and m/s.
 state_0[5] = numpy.sqrt( (GM+satelliteMass)/numpy.linalg.norm(state_0[:3]) ) # Assume we're starting from a circular orbit.
 initialOrbitalPeriod = calculateCircularPeriod(state_0) # Orbital period of the initial circular orbit.
-#colatitude,longitude,geocentricRadius = calculateGeocentricLatLon(state_0, 0)
-#
-#gravitationalPotential = 0.0 # Potential of the gravitational field at the stateVec location.
-#for degree in range(0, MAX_DEGREE+1): # Go through all the desired orders and compute the geoid corrections to the sphere.
-#        temp = 0. # Contribution to the potential from the current degree and all corresponding orders.
-#        legendreCoeffs = scipy.special.legendre(degree) # Legendre polynomial coefficients corresponding to the current degree.
-#        for order in range(degree+1): # Go through all the orders corresponding to the currently evaluated degree.
-#            if colatitude-math.pi/2. <= 1E-16: # We're at the equator, cos(colatitude) will be zero and things will break.
-#                temp += legendreCoeffs[order] *         1.0          * (Ccoeffs[degree][order]*math.cos( order*longitude ) + Scoeffs[degree][order]*math.sin( order*longitude ))
-#            else:
-#                temp += legendreCoeffs[order] * math.cos(colatitude) * (Ccoeffs[degree][order]*math.cos( order*longitude ) + Scoeffs[degree][order]*math.sin( order*longitude ))
-#        
-#        gravitationalPotential += math.pow(EarthRadius/geocentricRadius, degree) * temp # Add the contribution from the current degree.
-#    
-#gravitationalPotential *= GM/geocentricRadius # Final correction.
-#gravityAcceleration = gravitationalPotential/geocentricRadius * -state_0[:3]/numpy.linalg.norm(state_0[:3]) # First divide by the radius to get the acceleration value, then get the direction (towards centre of the Earth).
+
+Ccoeffs = {0:[1],1:[0,0],2:[-0.484165371736E-03,0,0],3:[0,0,0,0]};
+Scoeffs ={0:[0],1:[0,0],2:[0,0,0],3:[0,0,0,0]}
+colatitude,longitude,geocentricRadius = calculateGeocentricLatLon(state_0, 0)
+
+gravitationalPotential = 0.0 # Potential of the gravitational field at the stateVec location.
+for degree in range(0, MAX_DEGREE+1): # Go through all the desired orders and compute the geoid corrections to the sphere.
+        temp = 0. # Contribution to the potential from the current degree and all corresponding orders.
+        legendreCoeffs = scipy.special.legendre(degree) # Legendre polynomial coefficients corresponding to the current degree.
+        for order in range(degree+1): # Go through all the orders corresponding to the currently evaluated degree.
+            if colatitude-math.pi/2. <= 1E-16: # We're at the equator, cos(colatitude) will be zero and things will break.
+                temp += legendreCoeffs[order] *         1.0          * (Ccoeffs[degree][order]*math.cos( order*longitude ) + Scoeffs[degree][order]*math.sin( order*longitude ))
+            else:
+                temp += legendreCoeffs[order] * math.cos(colatitude) * (Ccoeffs[degree][order]*math.cos( order*longitude ) + Scoeffs[degree][order]*math.sin( order*longitude ))
+        
+        gravitationalPotential += math.pow(EarthRadius/geocentricRadius, degree) * temp # Add the contribution from the current degree.
     
+gravitationalPotential *= GM/geocentricRadius # Final correction.
+gravityAcceleration = gravitationalPotential/geocentricRadius * (-1.*state_0[:3]/numpy.linalg.norm(state_0[:3])) # First divide by the radius to get the acceleration value, then get the direction (towards centre of the Earth).
+
 " Propagation time settings. "
 INTEGRATION_TIME_STEP_S = 10.0 # Time step at which the trajectory will be propagated.
 epochsOfInterest = numpy.arange(0, 10*initialOrbitalPeriod, INTEGRATION_TIME_STEP_S) # Times at which the solution is to be computed. Same unit as the time unit of the accelerations and velocities (seconds).
@@ -259,8 +286,9 @@ propagatedStates = numpy.zeros( (epochsOfInterest.shape[0],6) ) # State vectors 
 propagatedStates[0,:] = state_0 # Apply the initial condition.
 for i in range(1,epochsOfInterest.shape[0]): # Propagate the state to all the desired epochs statring from state_0.
     propagatedStates[i,:] = RungeKutta4(propagatedStates[i-1], epochsOfInterest[i-1], INTEGRATION_TIME_STEP_S, computeRateOfChangeOfState)
+    #TODO check if altitude ins't too low. For some reason the object will start gaining energy 
     
-" Compute quantities derived from the porpagated state vectors. "
+" Compute quantities derived from the propagated state vectors. "
 altitudes = [ (numpy.linalg.norm(x[:3])-EarthRadius) for x in propagatedStates] # Altitudes above spherical Earth...
 specificEnergies = [ numpy.linalg.norm(x[3:])*numpy.linalg.norm(x[3:]) - GM*satelliteMass/numpy.linalg.norm(x[:3]) for x in propagatedStates] # ...and corresponding specific orbital energies.
 
