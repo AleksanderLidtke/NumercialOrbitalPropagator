@@ -35,7 +35,11 @@ def readEGM96Coefficients():
             CcoeffsTemp.append( row[3] )
             ScoeffsTemp.append( row[4] )
     
-    degrees=map(int, degrees); orders=map(int, orders); CcoeffsTemp=map(float, CcoeffsTemp); ScoeffsTemp=map(float, ScoeffsTemp); # Change to numbers from str.
+    # Change to numbers from str.
+    degrees = [int(x) for x in degrees]
+    orders = [int(x) for x in orders]
+    CcoeffsTemp = [float(x) for x in CcoeffsTemp]
+    ScoeffsTemp = [float(x) for x in ScoeffsTemp]
     
     " Parse C and S coefficients to an easily usable format. "
     # Store a list of coefficients corresponding to the given degree of len( no. orders corresponding to this degree ).
@@ -259,7 +263,7 @@ state_0[5] = numpy.sqrt( (GM+satelliteMass)/numpy.linalg.norm(state_0[:3]) ) # A
 initialOrbitalPeriod = calculateCircularPeriod(state_0) # Orbital period of the initial circular orbit.
 
 Ccoeffs = {0:[1],1:[0,0],2:[-0.484165371736E-03,0,0],3:[0,0,0,0]};
-Scoeffs ={0:[0],1:[0,0],2:[0,0,0],3:[0,0,0,0]}
+Scoeffs = {0:[0],1:[0,0],2:[0,0,0],3:[0,0,0,0]}
 colatitude,longitude,geocentricRadius = calculateGeocentricLatLon(state_0, 0)
 
 gravitationalPotential = 0.0 # Potential of the gravitational field at the stateVec location.
@@ -285,12 +289,14 @@ propagatedStates = numpy.zeros( (epochsOfInterest.shape[0],6) ) # State vectors 
 " Actual numerical propagation main loop. "
 propagatedStates[0,:] = state_0 # Apply the initial condition.
 for i in range(1,epochsOfInterest.shape[0]): # Propagate the state to all the desired epochs statring from state_0.
-    propagatedStates[i,:] = RungeKutta4(propagatedStates[i-1], epochsOfInterest[i-1], INTEGRATION_TIME_STEP_S, computeRateOfChangeOfState)
+    propagatedStates[i,:] = RungeKutta4(propagatedStates[i-1], epochsOfInterest[i-1],
+                                        INTEGRATION_TIME_STEP_S, computeRateOfChangeOfState)
     #TODO check if altitude ins't too low. For some reason the object will start gaining energy 
     
 " Compute quantities derived from the propagated state vectors. "
 altitudes = [ (numpy.linalg.norm(x[:3])-EarthRadius) for x in propagatedStates] # Altitudes above spherical Earth...
-specificEnergies = [ numpy.linalg.norm(x[3:])*numpy.linalg.norm(x[3:]) - GM*satelliteMass/numpy.linalg.norm(x[:3]) for x in propagatedStates] # ...and corresponding specific orbital energies.
+specificEnergies = [ numpy.linalg.norm(x[3:])*numpy.linalg.norm(x[3:]) -
+                    GM*satelliteMass/numpy.linalg.norm(x[:3]) for x in propagatedStates] # ...and corresponding specific orbital energies.
 
 """
 ===============================================================================
@@ -311,18 +317,21 @@ matplotlib.rc('ytick', labelsize=ticksFontSize)
 """
 fig = matplotlib.pyplot.figure(figsize=(12,8))
 ax = Axes3D(fig)
-ax.set_aspect("equal")
+ax.set_aspect('auto') #TODO change 3D axes aspect ratio to equal, which isn't supported now.
 ax.view_init(elev=45., azim=45.)
-ax.set_xlim([-1.5*EarthRadius, 1.5*EarthRadius]); ax.set_ylim([-1.5*EarthRadius, 1.5*EarthRadius]); ax.set_zlim([-1.5*EarthRadius, 1.5*EarthRadius]);
+ax.set_xlim([-1.5*EarthRadius, 1.5*EarthRadius])
+ax.set_ylim([-1.5*EarthRadius, 1.5*EarthRadius])
+ax.set_zlim([-1.5*EarthRadius, 1.5*EarthRadius])
 
 " Plot a sphere that represents the Earth. "
-N_POINTS = 50 # Number of lattitudes and longitudes used to plot the geoid.
+N_POINTS = 20 # Number of lattitudes and longitudes used to plot the geoid.
 latitudes = numpy.linspace(0, math.pi, N_POINTS) # Geocentric latitudes and longitudes where the geoid will be visualised.
 longitudes = numpy.linspace(0, 2*math.pi, N_POINTS)
 Xs = EarthRadius * numpy.outer(numpy.cos(latitudes), numpy.sin(longitudes))
 Ys = EarthRadius * numpy.outer(numpy.sin(latitudes), numpy.sin(longitudes))
 Zs = EarthRadius * numpy.outer(numpy.ones(latitudes.size), numpy.cos(longitudes))
-earthSurface = ax.plot_surface(Xs, Ys, Zs, rstride=1, cstride=1, linewidth=0, antialiased=False, shade=False)
+earthSurface = ax.plot_surface(Xs, Ys, Zs, rstride=1, cstride=1, linewidth=0,
+                               antialiased=False, shade=False, alpha=0.5)
 
 " Plot the trajectory. "
 ax.plot(propagatedStates[:,0],propagatedStates[:,1],propagatedStates[:,2], c='r', lw=4)
@@ -334,7 +343,9 @@ fig.show()
     FIGURE THAT SHOWS THE ALTITUDE AND ORBITAL ENERGY EVOLUTION.
 ===============================================================================
 """
-fig2 = matplotlib.pyplot.figure(figsize=(12,8)); ax2=fig2.gca(); ax2_2 = ax2.twinx();
+fig2 = matplotlib.pyplot.figure(figsize=(12,8))
+ax2=fig2.gca()
+ax2_2 = ax2.twinx();
 ax2.set_xlabel(r"$Time\ elapsed\ (s)$", fontsize=labelsFontSize)
 ax2.set_ylabel(r"$Altitude\ above\ spherical\ Earth\ (m)$", fontsize=labelsFontSize)
 ax2_2.set_ylabel(r"$Specific\ orbital\ energy\ (m^2 s^{-2})$", fontsize=labelsFontSize)
@@ -350,7 +361,7 @@ fig2.show()
     FIGURE SHOWING EVOLUTION OF THE POSITION COMPONENTS OVER TIME.
 ===============================================================================
 """
-fig3, axarr = matplotlib.pyplot.subplots(3, sharex=True)
+fig3, axarr = matplotlib.pyplot.subplots(3, sharex=True, figsize=(12,8))
 axarr[0].grid(linewidth=2); axarr[1].grid(linewidth=2); axarr[2].grid(linewidth=2);
 axarr[0].tick_params(axis='both',reset=False,which='both',length=5,width=1.5)
 axarr[1].tick_params(axis='both',reset=False,which='both',length=5,width=1.5)
