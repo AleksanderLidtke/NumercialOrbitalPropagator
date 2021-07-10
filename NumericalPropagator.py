@@ -317,11 +317,13 @@ matplotlib.rc('ytick', labelsize=ticksFontSize)
 """
 fig = matplotlib.pyplot.figure(figsize=(12,8))
 ax = Axes3D(fig)
-ax.set_aspect('auto') #TODO change 3D axes aspect ratio to equal, which isn't supported now.
+ax.set_aspect('auto') #TODO change 3D axes aspect ratio to equal, which isn't supported now. Current workaround is set scale_xyz below.
 ax.view_init(elev=45., azim=45.)
-ax.set_xlim([-1.5*EarthRadius, 1.5*EarthRadius])
-ax.set_ylim([-1.5*EarthRadius, 1.5*EarthRadius])
-ax.set_zlim([-1.5*EarthRadius, 1.5*EarthRadius])
+figRange = 1.5*EarthRadius
+ax.set_xlim([-figRange, figRange])
+ax.set_ylim([-figRange, figRange])
+ax.set_zlim([-figRange, figRange])
+ax.auto_scale_xyz([-figRange, figRange], [-figRange, figRange], [-figRange, figRange])
 
 " Plot a sphere that represents the Earth. "
 N_POINTS = 20 # Number of lattitudes and longitudes used to plot the geoid.

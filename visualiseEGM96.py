@@ -40,7 +40,11 @@ with open("EGM96coefficients", "r") as egm96file:
         CcoeffsTemp.append( row[3] )
         ScoeffsTemp.append( row[4] )
 
-degrees=map(int, degrees); orders=map(int, orders); CcoeffsTemp=map(float, CcoeffsTemp); ScoeffsTemp=map(float, ScoeffsTemp); # Change to numbers from str.
+# Change to numbers from str.
+degrees = [int(x) for x in degrees]
+orders = [int(x) for x in orders]
+CcoeffsTemp = [float(x) for x in CcoeffsTemp]
+ScoeffsTemp = [float(x) for x in ScoeffsTemp]
 
 " Parse C and S coefficients to an easily usable format. "
 # Store a list of coefficients corresponding to the given degree of len( no. orders corresponding to this degree ).
@@ -90,11 +94,13 @@ matplotlib.rc('ytick', labelsize=ticksFontSize)
 """
 fig = matplotlib.pyplot.figure(figsize=(12,8))
 ax = Axes3D(fig)
-ax.set_aspect("equal")
+ax.set_aspect('auto') #TODO change 3D axes aspect ratio to equal, which isn't supported now. Current workaround is set scale_xyz below.
 ax.view_init(elev=45., azim=45.)
-ax.set_xlim([-1.5*radius, 1.5*radius])
-ax.set_ylim([-1.5*radius, 1.5*radius])
-ax.set_zlim([-1.5*radius, 1.5*radius])
+figRange = 1.5*radius
+ax.set_xlim([-figRange, figRange])
+ax.set_ylim([-figRange, figRange])
+ax.set_zlim([-figRange, figRange])
+ax.auto_scale_xyz([-figRange, figRange], [-figRange, figRange], [-figRange, figRange])
 
 gravitationalPotentialsPlot = gravitationalPotentials/gravitationalPotentials.max() # Normalise to [0 1]
 
