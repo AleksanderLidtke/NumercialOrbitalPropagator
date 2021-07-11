@@ -1,0 +1,89 @@
+\documentclass[11pt,a4paper,oneside]{report}
+\usepackage[hyphens]{url}
+\usepackage{units, color, amsmath, graphicx, todonotes, multirow, xspace, hyperref, booktabs, tabularx}
+
+\setlength{\topmargin}{-0.5cm}
+\setlength{\oddsidemargin}{0cm}
+\setlength{\evensidemargin}{0cm}
+\setlength{\textheight}{24cm}
+\setlength{\textwidth}{16cm}
+
+\begin{document}
+
+%===============================================================================
+%===============================================================================
+%===============================================================================
+\chapter{Force modelling}
+
+\section{Atmospheric drag}
+The NRLMSISE-00 model 2001 ported to Python. Based off of Dominik Brodowski 20100516 version available here: \textcolor{blue}{\url{http://www.brodo.de/english/pub/nrlmsise/}}
+
+\section{Earth gravity}
+EGM96 gravity field model at a spherical surface.
+\todo[inline, color=yellow]{Ignore tides for simplicity.}
+
+EGM96 coefficients available at: \textcolor{blue}{\url{https://cddis.nasa.gov/926/egm96/getit.html}}
+
+The used expansion degree is defined by \verb|MAX_DEGREE|. All the orders corresponding to a given degree are accounted for.
+
+\section{Solar radiation pressure}
+\todo[inline, color=yellow]{add SRP to the force model}
+
+\section{Luni-solar gravity}
+\todo[inline, color=yellow]{add Luni-solar gravity to the force model}
+
+\section{Gravity of other major planets}
+\todo[inline, color=yellow]{add gravity of other large planets in the solar system to the force model}
+
+%===============================================================================
+%===============================================================================
+%===============================================================================
+\chapter{Propagation flow}
+
+\todo[color=red,inline]{there are a lot vector arrows missing here...}
+
+\section{Initial conditions}
+\subsection{State}
+Denote the initial state as $r_0$ (\textbf{N.B.} \verb|state_0| is used in the code):
+\[
+ r_0 = \begin{bmatrix}x_0 \\ x_1 \\  x_2 \\ \dot{x_0} \\ \dot{x_1} \\ \dot{x_2}\end{bmatrix}^T,
+\]
+where $x_i$ is the position of the object along the $i^{\textrm{th}}$ direction of a Cartesian reference frame, and $\dot{x_i}$ is the rate of change of this position w.r.t. to time.
+The first thee elements of $r$, i.e. the \emph{position} are denoted as $p$, while the last three (the \emph{velocity}) as $v$.
+Metres and metres per second are used as the respective units.
+
+\subsection{Satellite properties}
+The following properties are associated with the satellite:
+\begin{itemize}
+	\item Mass in kg (\verb|satelliteMass| ),
+	\item Dimensionless drag coefficient $C_d$ (\verb|Cd|),
+	\item Drag area in metres squared (\verb|dragArea| ).
+\end{itemize}
+
+\todo[inline, color=yellow]{should add $C_R$ to the initial conditions when adding SRP}
+
+\subsection{Environmental properties}
+These are the properties associated with the space environment, namely:
+\begin{itemize}
+	\item \unit[81]{day}-average F10.7 (\verb|F10_7A|),
+	\item Daily F10.7 from the previous day (\verb|F10_7|),
+	\item Daily magnetic index (\verb|MagneticIndex|).
+\end{itemize}
+
+\todo[inline, color=yellow]{F10.7 and magnetic index should be time-dependent, they are currently held constant.}
+
+\section{Propagation}
+The initial state $r_0$ is numerically propagated to the pre-defined epochs of interest (\verb|epochsOfInterest|), which are equi-spaced in time as given by the
+propagator time-step (\verb|INTEGRATION_TIME_STEP_S|). The states corresponding to all the time steps are saved in \verb|propagatedStates|. The flow of propagating
+from time-step $i$ to $i+1$ is as follows:
+\begin{enumerate}
+	\item Compute geo-centric radius, latitude and longitude at $r_i$ corresponding to $t_i$ (colatitude,longitude,geocentricRadius),
+	\item Compute the gravity potential at the current geo-centric location using the EGM96 gravity model up to a pre-defined degree.
+	\item Compute the acceleration due to gravity, $a_g$.
+	\item Compute the acceleration due to drag, $a_d$.
+	\item Take a step using the $4^{\mathrm{th}}$ order Runge-Kutta integration scheme by observing that the rate of change of position is equal to the current velocity ($\dot{p_i} = v_i$),
+	and that the velocity itself is changing under the influence of the gravity and drag accelerations ($\dot{v} = a_g + a_d$).
+	\item Continue from the beginning at the next satellite position.
+\end{enumerate}
+
+\end{document}

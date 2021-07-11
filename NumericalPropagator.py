@@ -80,39 +80,6 @@ def RungeKutta4(X,t,dt,rateOfChangeFunction):
     k2 = dt*rateOfChangeFunction(X+k1/2.,t+dt/2.)
     k3 = dt*rateOfChangeFunction(X+k2,t+dt)
     return X + (k0+2.*k1+2.*k2+k3)/6.
-    
-"""
-===============================================================================
-    PROBLEM SETUP.
-===============================================================================
-"""
-" Gravity model settings. "
-GM = 3986004.415E8 # Earth's gravity constant from EGM96, m**3/s**2.
-EarthRadius = 6378136.3 # Earth's equatorial radius from EGM96, m.
-MAX_DEGREE = 2 # Maximum degree of the geopotential harmocic expansion to use.
-Ccoeffs, Scoeffs = readEGM96Coefficients() # Get the gravitational potential exampnsion coefficients.
-
-" Atmospheric density model settings. "
-NRLMSISEflags = nrlmsise_00_header.nrlmsise_flags()
-NRLMSISEaph = nrlmsise_00_header.ap_array() #TODO this should contain the following:
-# * Array containing the following magnetic values:
-# *   0 : daily AP
-# *   1 : 3 hr AP index for current time
-# *   2 : 3 hr AP index for 3 hrs before current time
-# *   3 : 3 hr AP index for 6 hrs before current time
-# *   4 : 3 hr AP index for 9 hrs before current time
-# *   5 : Average of eight 3 hr AP indicies from 12 to 33 hrs 
-# *           prior to current time
-# *   6 : Average of eight 3 hr AP indicies from 36 to 57 hrs 
-# *           prior to current time
-F10_7A = 70 # 81-day average F10.7.
-F10_7 = 180 # Daily F10.7 for the previous day.
-MagneticIndex = 40 # Daily magnetic index.
-
-" Initial conditions of the satellite. "
-satelliteMass = 1000. # kg
-Cd = 2.2 # Drag coefficient, dimensionless.
-dragArea = 5.0 # Area exposed to atmospheric drag, m2.
 
 """
 ===============================================================================
@@ -169,7 +136,11 @@ def calculateDragAcceleration(stateVec, ecpoh, satMass):
     #    " Prepare the atmospheric density model inputs. "
 #    #TODO - calculate the altitude, latitude, longitude
     altitude_km = numpy.linalg.norm(stateVec[:3])/1000.0 #TODO this isn't altitude in km, but radius in km. Is this OK?
-    NRLMSISEinput = nrlmsise_00_header.nrlmsise_input(year=0, doy=0, sec=0.0, alt=altitude_km, g_lat=0.0, g_long=0.0, lst=0.0, f107A=F10_7A, f107=F10_7, ap=MagneticIndex, ap_a=NRLMSISEaph)
+
+    NRLMSISEinput = nrlmsise_00_header.nrlmsise_input(year=0, doy=0, sec=0.0, #TODO should account for the actual epoch in drag calculation...
+                                        alt=altitude_km, g_lat=0.0, g_long=0.0, #TODO should account for the geodetic latitude and longitude in the drag calculation...
+                                        lst=0.0, f107A=F10_7A, f107=F10_7, #TODO should account for the local solar time in the drag calculation...
+                                        ap=MagneticIndex, ap_a=NRLMSISEaph)
     nrlmsise_00_header.lstCalc( NRLMSISEinput ) # Calculate the local solar time.
     
     " Use the calculated atmospheric density to compute the drag force. "
@@ -213,6 +184,7 @@ def calculateGravityAcceleration(stateVec, epoch):
     gravitationalPotential *= GM/EarthRadius # Final correction.
 
     " Compute the acceleration due to the gravity potential at the given point. "
+    #TODO this could be wrong - gravity won't always point at the centre of the Earth because it's a geoid, not a sphere?
     gravityAcceleration = gravitationalPotential/numpy.linalg.norm(stateVec[:3]) * (-1.*stateVec[:3]/numpy.linalg.norm(stateVec[:3])) # First divide by the radius to get the acceleration value, then get the direction (towards centre of the Earth).
 
     return gravityAcceleration
@@ -251,35 +223,69 @@ def calculateCircularPeriod(stateVec):
         in seconds.
     """
     return 2*math.pi*numpy.sqrt(math.pow(numpy.linalg.norm(stateVec[:3]),3)/GM)
-    
+
+"""
+===============================================================================
+    FORCE MODEL SETTINGS.
+===============================================================================
+"""
+" Gravity model settings. "
+GM = 3986004.415E8 # Earth's gravity constant from EGM96, m**3/s**2.
+EarthRadius = 6378136.3 # Earth's equatorial radius from EGM96, m.
+MAX_DEGREE = 2 # Maximum degree of the geopotential harmocic expansion to use.
+Ccoeffs, Scoeffs = readEGM96Coefficients() # Get the gravitational potential exampnsion coefficients.
+
+" Atmospheric density model settings. "
+NRLMSISEflags = nrlmsise_00_header.nrlmsise_flags()
+NRLMSISEaph = nrlmsise_00_header.ap_array() #TODO this should contain the following:
+# * Array containing the following magnetic values:
+# *   0 : daily AP
+# *   1 : 3 hr AP index for current time
+# *   2 : 3 hr AP index for 3 hrs before current time
+# *   3 : 3 hr AP index for 6 hrs before current time
+# *   4 : 3 hr AP index for 9 hrs before current time
+# *   5 : Average of eight 3 hr AP indicies from 12 to 33 hrs
+# *           prior to current time
+# *   6 : Average of eight 3 hr AP indicies from 36 to 57 hrs
+# *           prior to current time
+F10_7A = 70 # 81-day average F10.7.
+F10_7 = 180 # Daily F10.7 for the previous day.
+MagneticIndex = 40 # Daily magnetic index.
+
 """
 ===============================================================================
     PROPAGATE THE ORBIT NUMERICALLY.
 ===============================================================================
 """
-" Initial conditions. "
+" Initial properties of the satellite. "
+satelliteMass = 1000. # kg
+Cd = 2.2 # Drag coefficient, dimensionless.
+dragArea = 5.0 # Area exposed to atmospheric drag, m2.
+
+" Initial state of the satellite. "
 state_0 = numpy.array([EarthRadius+500.0e3,0.,0.,0.,0.,0.]) # Initial state vector with Cartesian positions and velocities in m and m/s.
-state_0[5] = numpy.sqrt( (GM+satelliteMass)/numpy.linalg.norm(state_0[:3]) ) # Assume we're starting from a circular orbit.
+state_0[5] = numpy.sqrt( (GM+satelliteMass)/numpy.linalg.norm(state_0[:3]) ) # Simple initial condition for test purposes: a circular orbit with velocity pointing along the +Z direction.
 initialOrbitalPeriod = calculateCircularPeriod(state_0) # Orbital period of the initial circular orbit.
 
-Ccoeffs = {0:[1],1:[0,0],2:[-0.484165371736E-03,0,0],3:[0,0,0,0]};
-Scoeffs = {0:[0],1:[0,0],2:[0,0,0],3:[0,0,0,0]}
-colatitude,longitude,geocentricRadius = calculateGeocentricLatLon(state_0, 0)
-
-gravitationalPotential = 0.0 # Potential of the gravitational field at the stateVec location.
-for degree in range(0, MAX_DEGREE+1): # Go through all the desired orders and compute the geoid corrections to the sphere.
-        temp = 0. # Contribution to the potential from the current degree and all corresponding orders.
-        legendreCoeffs = scipy.special.legendre(degree) # Legendre polynomial coefficients corresponding to the current degree.
-        for order in range(degree+1): # Go through all the orders corresponding to the currently evaluated degree.
-            if colatitude-math.pi/2. <= 1E-16: # We're at the equator, cos(colatitude) will be zero and things will break.
-                temp += legendreCoeffs[order] *         1.0          * (Ccoeffs[degree][order]*math.cos( order*longitude ) + Scoeffs[degree][order]*math.sin( order*longitude ))
-            else:
-                temp += legendreCoeffs[order] * math.cos(colatitude) * (Ccoeffs[degree][order]*math.cos( order*longitude ) + Scoeffs[degree][order]*math.sin( order*longitude ))
-        
-        gravitationalPotential += math.pow(EarthRadius/geocentricRadius, degree) * temp # Add the contribution from the current degree.
-    
-gravitationalPotential *= GM/geocentricRadius # Final correction.
-gravityAcceleration = gravitationalPotential/geocentricRadius * (-1.*state_0[:3]/numpy.linalg.norm(state_0[:3])) # First divide by the radius to get the acceleration value, then get the direction (towards centre of the Earth).
+######## Initial gravity acceleration - redundant because will be re-computed in computeRateOfChangeOfState?
+# Ccoeffs = {0:[1],1:[0,0],2:[-0.484165371736E-03,0,0],3:[0,0,0,0]};
+# Scoeffs = {0:[0],1:[0,0],2:[0,0,0],3:[0,0,0,0]}
+# colatitude,longitude,geocentricRadius = calculateGeocentricLatLon(state_0, 0)
+#
+# gravitationalPotential = 0.0 # Potential of the gravitational field at the stateVec location.
+# for degree in range(0, MAX_DEGREE+1): # Go through all the desired orders and compute the geoid corrections to the sphere.
+#         temp = 0. # Contribution to the potential from the current degree and all corresponding orders.
+#         legendreCoeffs = scipy.special.legendre(degree) # Legendre polynomial coefficients corresponding to the current degree.
+#         for order in range(degree+1): # Go through all the orders corresponding to the currently evaluated degree.
+#             if colatitude-math.pi/2. <= 1E-16: # We're at the equator, cos(colatitude) will be zero and things will break.
+#                 temp += legendreCoeffs[order] *         1.0          * (Ccoeffs[degree][order]*math.cos( order*longitude ) + Scoeffs[degree][order]*math.sin( order*longitude ))
+#             else:
+#                 temp += legendreCoeffs[order] * math.cos(colatitude) * (Ccoeffs[degree][order]*math.cos( order*longitude ) + Scoeffs[degree][order]*math.sin( order*longitude ))
+#
+#         gravitationalPotential += math.pow(EarthRadius/geocentricRadius, degree) * temp # Add the contribution from the current degree.
+#
+# gravitationalPotential *= GM/geocentricRadius # Final correction.
+# gravityAcceleration = gravitationalPotential/geocentricRadius * (-1.*state_0[:3]/numpy.linalg.norm(state_0[:3])) # First divide by the radius to get the acceleration value, then get the direction (towards centre of the Earth).
 
 " Propagation time settings. "
 INTEGRATION_TIME_STEP_S = 10.0 # Time step at which the trajectory will be propagated.
@@ -291,7 +297,7 @@ propagatedStates[0,:] = state_0 # Apply the initial condition.
 for i in range(1,epochsOfInterest.shape[0]): # Propagate the state to all the desired epochs statring from state_0.
     propagatedStates[i,:] = RungeKutta4(propagatedStates[i-1], epochsOfInterest[i-1],
                                         INTEGRATION_TIME_STEP_S, computeRateOfChangeOfState)
-    #TODO check if altitude ins't too low. For some reason the object will start gaining energy 
+    #TODO check if altitude isn't too low.
     
 " Compute quantities derived from the propagated state vectors. "
 altitudes = [ (numpy.linalg.norm(x[:3])-EarthRadius) for x in propagatedStates] # Altitudes above spherical Earth...
