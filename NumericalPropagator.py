@@ -11,6 +11,7 @@ import scipy.integrate, numpy, csv, math
 import pandas as pd
 from datetime import datetime, timedelta
 import nrlmsise_00_header, nrlmsise_00
+from utilities import GM, Arrow3D
 
 def readEGM96Coefficients():
     """ Read the EGM96 gravitational field model coefficients from EGM96coefficients
@@ -170,6 +171,7 @@ def calculateGravityAcceleration(stateVec, epoch, useGeoid):
     numpy.ndarray of shape (1,3) with three Cartesian components of the
         acceleration in m/s2 given in an inertial reference frame.
     """
+    r = numpy.linalg.norm(stateVec[:3]) # Distance to Earth's centre a.k.a. the radius.
     if useGeoid:
         " Compute geocentric latitude and longitude. "
         colatitude,longitude,geocentricRadius = calculateGeocentricLatLon(stateVec, epoch)
@@ -185,15 +187,15 @@ def calculateGravityAcceleration(stateVec, epoch, useGeoid):
                 else:
                     temp += legendreCoeffs[order] * math.cos(colatitude) * (Ccoeffs[degree][order]*math.cos( order*longitude ) + Scoeffs[degree][order]*math.sin( order*longitude ))
 
-            gravitationalPotential += math.pow(EarthRadius/numpy.linalg.norm(stateVec[:3]), degree) * temp # Add the contribution from the current degree.
+            gravitationalPotential += math.pow(EarthRadius/r, degree) * temp # Add the contribution from the current degree.
 
         gravitationalPotential *= GM/EarthRadius # Final correction.
 
         " Compute the acceleration due to the gravity potential at the given point. "
-        #TODO this could be wrong - gravity won't always point at the centre of the Earth because it's a geoid, not a sphere?
-        gravityAcceleration = gravitationalPotential/numpy.linalg.norm(stateVec[:3]) * (-1.*stateVec[:3]/numpy.linalg.norm(stateVec[:3])) # First divide by the radius to get the acceleration value, then get the direction (towards centre of the Earth).
+        # stateVec is defined w.r.t. Earth's centre of mass, so no need to account
+        # for the geoid shape here.
+        gravityAcceleration = gravitationalPotential/r* (-1.*stateVec[:3]/r) # First divide by the radius to get the acceleration value, then get the direction (towards centre of the Earth).
     else:
-        r = numpy.linalg.norm(stateVec[:3])
         gravityAcceleration = GM/(r*r) * (-1.*stateVec[:3]/r) # First compute the magnitude, then get the direction (towards centre of the Earth).
 
     return gravityAcceleration
@@ -243,10 +245,10 @@ def calculateCircularPeriod(stateVec):
 ===============================================================================
 """
 " Gravity model settings. "
-GM = 3986004.415E8 # Earth's gravity constant from EGM96, m**3/s**2.
+
 EarthRadius = 6378136.3 # Earth's equatorial radius from EGM96, m.
-MAX_DEGREE = 2 # Maximum degree of the geopotential harmocic expansion to use.
-USE_GEOID = False # Whether to account for Earth's geoid (True) or assume two-body problem (False).
+MAX_DEGREE = 1 # Maximum degree of the geopotential harmocic expansion to use.
+USE_GEOID = True # Whether to account for Earth's geoid (True) or assume two-body problem (False).
 USE_DRAG = False # Whether to account for drag acceleration (True), or ignore it (False).
 Ccoeffs, Scoeffs = readEGM96Coefficients() # Get the gravitational potential exampnsion coefficients.
 
@@ -308,6 +310,7 @@ INTEGRATION_TIME_STEP_S = 10.0 # Time step at which the trajectory will be propa
 epochsOfInterest = pd.date_range(start=epoch_0, end=epoch_0+timedelta(seconds=2*initialOrbitalPeriod),
               freq=pd.DateOffset(seconds=INTEGRATION_TIME_STEP_S)).to_pydatetime().tolist()
 propagatedStates = numpy.zeros( (len(epochsOfInterest),6) ) # State vectors at the  epochs of interest.
+propagatedStates2Body = numpy.zeros( (len(epochsOfInterest),6) )
 
 " Actual numerical propagation main loop. "
 propagatedStates[0,:] = state_0 # Apply the initial condition.
@@ -315,11 +318,20 @@ for i in range(1, len(epochsOfInterest)): # Propagate the state to all the desir
     propagatedStates[i,:] = RungeKutta4(propagatedStates[i-1], epochsOfInterest[i-1],
                                         INTEGRATION_TIME_STEP_S, computeRateOfChangeOfState)
     #TODO check if altitude isn't too low.
-    
+
+# Propagate with two-body for comparison.
+USE_GEOID = False
+propagatedStates2Body[0,:] = state_0 # Apply the initial condition.
+for i in range(1, len(epochsOfInterest)): # Propagate the state to all the desired epochs statring from state_0.
+    propagatedStates2Body[i,:] = RungeKutta4(propagatedStates2Body[i-1], propagatedStates2Body[i-1],
+                                        INTEGRATION_TIME_STEP_S, computeRateOfChangeOfState)
+
 " Compute quantities derived from the propagated state vectors. "
 altitudes = numpy.linalg.norm(propagatedStates[:,:3], axis=1) - EarthRadius # Altitudes above spherical Earth...
 specificEnergies = [ numpy.linalg.norm(x[3:])*numpy.linalg.norm(x[3:]) -
                     GM*satelliteMass/numpy.linalg.norm(x[:3]) for x in propagatedStates] # ...and corresponding specific orbital energies.
+
+altitudes2Body = numpy.linalg.norm(propagatedStates2Body[:,:3], axis=1) - EarthRadius
 
 """
 ===============================================================================
@@ -348,7 +360,7 @@ ax.set_ylim([-figRange, figRange])
 ax.set_zlim([-figRange, figRange])
 ax.auto_scale_xyz([-figRange, figRange], [-figRange, figRange], [-figRange, figRange])
 
-" Plot a sphere that represents the Earth. "
+" Plot a sphere that represents the Earth and the coordinate frame. "
 N_POINTS = 20 # Number of lattitudes and longitudes used to plot the geoid.
 latitudes = numpy.linspace(0, math.pi, N_POINTS) # Geocentric latitudes and longitudes where the geoid will be visualised.
 longitudes = numpy.linspace(0, 2*math.pi, N_POINTS)
@@ -358,8 +370,16 @@ Zs = EarthRadius * numpy.outer(numpy.ones(latitudes.size), numpy.cos(longitudes)
 earthSurface = ax.plot_surface(Xs, Ys, Zs, rstride=1, cstride=1, linewidth=0,
                                antialiased=False, shade=False, alpha=0.5)
 
+xArrow = Arrow3D([0, 1.5*EarthRadius],[0, 0],[0, 0], mutation_scale=20, lw=1, arrowstyle='-|>', color='r')
+yArrow = Arrow3D([0, 0],[0, 1.5*EarthRadius],[0, 0], mutation_scale=20, lw=1, arrowstyle='-|>', color='g')
+zArrow = Arrow3D([0, 0],[0, 0],[0, 1.5*EarthRadius], mutation_scale=20, lw=1, arrowstyle='-|>', color='b')
+ax.add_artist(xArrow)
+ax.add_artist(yArrow)
+ax.add_artist(zArrow)
+
 " Plot the trajectory. "
-ax.plot(propagatedStates[:,0],propagatedStates[:,1],propagatedStates[:,2], c='r', lw=4)
+ax.plot(propagatedStates[:,0],propagatedStates[:,1],propagatedStates[:,2], c='r', lw=2, ls='-')
+ax.plot(propagatedStates2Body[:,0],propagatedStates2Body[:,1],propagatedStates2Body[:,2], c='b', lw=2, ls='--')
 
 fig.show()
 
@@ -376,8 +396,9 @@ ax2.set_ylabel(r"$Altitude\ above\ spherical\ Earth\ (m)$", fontsize=labelsFontS
 ax2_2.set_ylabel(r"$Specific\ orbital\ energy\ (m^2 s^{-2})$", fontsize=labelsFontSize)
 ax2.grid(True, which='both')
 
-ax2.plot(epochsOfInterest, altitudes, c='r', lw=4, ls='-')
-ax2_2.plot(epochsOfInterest, specificEnergies, c='b', lw=4, ls='-')
+ax2.plot(epochsOfInterest, altitudes, c='r', lw=2, ls='-')
+ax2.plot(epochsOfInterest, altitudes2Body, c='b', lw=2, ls='--')
+ax2_2.plot(epochsOfInterest, specificEnergies, c='m', lw=2, ls='-')
 
 fig2.show()
 
@@ -397,8 +418,12 @@ axarr[0].set_ylabel(r'$X\ (m)$',fontsize=labelsFontSize)
 axarr[1].set_ylabel(r'$Y\ (m)$',fontsize=labelsFontSize)
 axarr[2].set_ylabel(r'$Z\ (m)$',fontsize=labelsFontSize)
 
-axarr[0].plot(epochsOfInterest, propagatedStates[:,0], c='r', lw=4, ls='-')
-axarr[1].plot(epochsOfInterest, propagatedStates[:,1], c='r', lw=4, ls='-')
-axarr[2].plot(epochsOfInterest, propagatedStates[:,2], c='r', lw=4, ls='-')
+axarr[0].plot(epochsOfInterest, propagatedStates[:,0], c='r', lw=2, ls='-')
+axarr[1].plot(epochsOfInterest, propagatedStates[:,1], c='r', lw=2, ls='-')
+axarr[2].plot(epochsOfInterest, propagatedStates[:,2], c='r', lw=2, ls='-')
+
+axarr[0].plot(epochsOfInterest, propagatedStates2Body[:,0], c='b', lw=2, ls='--')
+axarr[1].plot(epochsOfInterest, propagatedStates2Body[:,1], c='b', lw=2, ls='--')
+axarr[2].plot(epochsOfInterest, propagatedStates2Body[:,2], c='b', lw=2, ls='--')
 
 fig3.show()
