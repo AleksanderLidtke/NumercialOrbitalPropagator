@@ -149,7 +149,7 @@ def calculateDragAcceleration(stateVec, ecpoh, satMass):
     dragForce = -0.5*atmosphericDensity*dragArea*Cd* numpy.power(stateVec[3:],2) # Drag foce in Newtons.
     return dragForce/satMass
 
-def calculateGravityAcceleration(stateVec, epoch):
+def calculateGravityAcceleration(stateVec, epoch, useGeoid):
     """ Calculate the acceleration due to gravtiy acting on the satellite at
     a given state (3 positions and 3 velocities). Ignore satellite's mass,
     i.e. use a restricted two-body problem.
@@ -160,32 +160,38 @@ def calculateGravityAcceleration(stateVec, epoch):
             second, respectively.
     epoch - float corresponding to the epoch at which the rate of change is
         to be computed.
+    useGeoid - bool, whether to compute the gravity by using EGM geopotential
+        expansion (True) or a restricted two-body problem (False).
     Returns
     ----------
     numpy.ndarray of shape (1,3) with three Cartesian components of the
         acceleration in m/s2 given in an inertial reference frame.
     """
-    " Compute geocentric latitude and longitude. "
-    colatitude,longitude,geocentricRadius = calculateGeocentricLatLon(stateVec, epoch)
-    
-    " Find the gravitational potential at the desired point. "
-    gravitationalPotential = 0.0 # Potential of the gravitational field at the stateVec location.
-    for degree in range(0, MAX_DEGREE+1): # Go through all the desired orders and compute the geoid corrections to the sphere.
-        temp = 0. # Contribution to the potential from the current degree and all corresponding orders.
-        legendreCoeffs = scipy.special.legendre(degree) # Legendre polynomial coefficients corresponding to the current degree.
-        for order in range(degree+1): # Go through all the orders corresponding to the currently evaluated degree.
-            if (abs(colatitude-math.pi/2. <= 1E-16)) or (abs(colatitude-3*math.pi/2. <= 1E-16)): # We're at the equator, cos(colatitude) will be zero and things will break.
-                temp += legendreCoeffs[order] *         1.0          * (Ccoeffs[degree][order]*math.cos( order*longitude ) + Scoeffs[degree][order]*math.sin( order*longitude ))
-            else:
-                temp += legendreCoeffs[order] * math.cos(colatitude) * (Ccoeffs[degree][order]*math.cos( order*longitude ) + Scoeffs[degree][order]*math.sin( order*longitude ))
-                
-        gravitationalPotential += math.pow(EarthRadius/numpy.linalg.norm(stateVec[:3]), degree) * temp # Add the contribution from the current degree.
-        
-    gravitationalPotential *= GM/EarthRadius # Final correction.
+    if useGeoid:
+        " Compute geocentric latitude and longitude. "
+        colatitude,longitude,geocentricRadius = calculateGeocentricLatLon(stateVec, epoch)
 
-    " Compute the acceleration due to the gravity potential at the given point. "
-    #TODO this could be wrong - gravity won't always point at the centre of the Earth because it's a geoid, not a sphere?
-    gravityAcceleration = gravitationalPotential/numpy.linalg.norm(stateVec[:3]) * (-1.*stateVec[:3]/numpy.linalg.norm(stateVec[:3])) # First divide by the radius to get the acceleration value, then get the direction (towards centre of the Earth).
+        " Find the gravitational potential at the desired point. "
+        gravitationalPotential = 0.0 # Potential of the gravitational field at the stateVec location.
+        for degree in range(0, MAX_DEGREE+1): # Go through all the desired orders and compute the geoid corrections to the sphere.
+            temp = 0. # Contribution to the potential from the current degree and all corresponding orders.
+            legendreCoeffs = scipy.special.legendre(degree) # Legendre polynomial coefficients corresponding to the current degree.
+            for order in range(degree+1): # Go through all the orders corresponding to the currently evaluated degree.
+                if (abs(colatitude-math.pi/2. <= 1E-16)) or (abs(colatitude-3*math.pi/2. <= 1E-16)): # We're at the equator, cos(colatitude) will be zero and things will break.
+                    temp += legendreCoeffs[order] *         1.0          * (Ccoeffs[degree][order]*math.cos( order*longitude ) + Scoeffs[degree][order]*math.sin( order*longitude ))
+                else:
+                    temp += legendreCoeffs[order] * math.cos(colatitude) * (Ccoeffs[degree][order]*math.cos( order*longitude ) + Scoeffs[degree][order]*math.sin( order*longitude ))
+
+            gravitationalPotential += math.pow(EarthRadius/numpy.linalg.norm(stateVec[:3]), degree) * temp # Add the contribution from the current degree.
+
+        gravitationalPotential *= GM/EarthRadius # Final correction.
+
+        " Compute the acceleration due to the gravity potential at the given point. "
+        #TODO this could be wrong - gravity won't always point at the centre of the Earth because it's a geoid, not a sphere?
+        gravityAcceleration = gravitationalPotential/numpy.linalg.norm(stateVec[:3]) * (-1.*stateVec[:3]/numpy.linalg.norm(stateVec[:3])) # First divide by the radius to get the acceleration value, then get the direction (towards centre of the Earth).
+    else:
+        r = numpy.linalg.norm(stateVec[:3])
+        gravityAcceleration = GM/(r*r) * (-1.*stateVec[:3]/r) # First compute the magnitude, then get the direction (towards centre of the Earth).
 
     return gravityAcceleration
     
@@ -202,8 +208,12 @@ def computeRateOfChangeOfState(stateVector, epoch):
     numpy.ndarray of shape (1,6) with the rates of change of position and velocity
         in the same inertial frame as the one in which stateVector was given.
     """
-    gravityAcceleration = calculateGravityAcceleration(stateVector, epoch) # A vector of the gravity force from EGM96 model.
-    dragAcceleration = calculateDragAcceleration(stateVector, epoch, satelliteMass) #  A vector of the drag computed with NRLMSISE-00.
+    gravityAcceleration = calculateGravityAcceleration(stateVector, epoch, USE_GEOID) # A vector of the gravity force from EGM96 model.
+
+    if USE_DRAG:
+        dragAcceleration = calculateDragAcceleration(stateVector, epoch, satelliteMass) #  A vector of the drag computed with NRLMSISE-00.
+    else:
+        dragAcceleration = [0.,0.,0.]
     
     stateDerivatives = numpy.zeros(6);
     stateDerivatives[:3] = stateVector[3:]; # Velocity is the rate of change of position.
@@ -233,6 +243,8 @@ def calculateCircularPeriod(stateVec):
 GM = 3986004.415E8 # Earth's gravity constant from EGM96, m**3/s**2.
 EarthRadius = 6378136.3 # Earth's equatorial radius from EGM96, m.
 MAX_DEGREE = 2 # Maximum degree of the geopotential harmocic expansion to use.
+USE_GEOID = False # Whether to account for Earth's geoid (True) or assume two-body problem (False).
+USE_DRAG = False # Whether to account for drag acceleration (True), or ignore it (False).
 Ccoeffs, Scoeffs = readEGM96Coefficients() # Get the gravitational potential exampnsion coefficients.
 
 " Atmospheric density model settings. "
@@ -264,7 +276,7 @@ dragArea = 5.0 # Area exposed to atmospheric drag, m2.
 
 " Initial state of the satellite. "
 state_0 = numpy.array([EarthRadius+500.0e3,0.,0.,0.,0.,0.]) # Initial state vector with Cartesian positions and velocities in m and m/s.
-state_0[5] = numpy.sqrt( (GM+satelliteMass)/numpy.linalg.norm(state_0[:3]) ) # Simple initial condition for test purposes: a circular orbit with velocity pointing along the +Z direction.
+state_0[5] = numpy.sqrt( GM/numpy.linalg.norm(state_0[:3]) ) # Simple initial condition for test purposes: a circular orbit with velocity pointing along the +Z direction.
 initialOrbitalPeriod = calculateCircularPeriod(state_0) # Orbital period of the initial circular orbit.
 
 ######## Initial gravity acceleration - redundant because will be re-computed in computeRateOfChangeOfState?
@@ -289,7 +301,7 @@ initialOrbitalPeriod = calculateCircularPeriod(state_0) # Orbital period of the 
 
 " Propagation time settings. "
 INTEGRATION_TIME_STEP_S = 10.0 # Time step at which the trajectory will be propagated.
-epochsOfInterest = numpy.arange(0, 10*initialOrbitalPeriod, INTEGRATION_TIME_STEP_S) # Times at which the solution is to be computed. Same unit as the time unit of the accelerations and velocities (seconds).
+epochsOfInterest = numpy.arange(0, 2*initialOrbitalPeriod, INTEGRATION_TIME_STEP_S) # Times at which the solution is to be computed. Same unit as the time unit of the accelerations and velocities (seconds).
 propagatedStates = numpy.zeros( (epochsOfInterest.shape[0],6) ) # State vectors at the  epochs of interest.
 
 " Actual numerical propagation main loop. "
