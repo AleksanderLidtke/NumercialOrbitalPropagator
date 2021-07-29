@@ -6,7 +6,10 @@ Created on Sat Feb 28 22:08:40 2015
 """
 
 from mpl_toolkits.mplot3d import Axes3D
-import matplotlib.pyplot, matplotlib.cm, matplotlib.ticker, matplotlib.font_manager, scipy.integrate, numpy, csv, math
+import matplotlib.pyplot, matplotlib.cm, matplotlib.ticker, matplotlib.font_manager
+import scipy.integrate, numpy, csv, math
+import pandas as pd
+from datetime import datetime, timedelta
 import nrlmsise_00_header, nrlmsise_00
 
 def readEGM96Coefficients():
@@ -54,7 +57,7 @@ def readEGM96Coefficients():
         
     return Ccoeffs, Scoeffs
         
-def RungeKutta4(X,t,dt,rateOfChangeFunction):
+def RungeKutta4(X, t, dt, rateOfChangeFunction):
     """ Use fourth-order Runge-Kutta numericla integration method to propagate
     a system of differential equations from state X, expressed at time t, by a
     time increment dt. Evolution of the sytstem is given by the rateOfChangeFunction
@@ -63,7 +66,7 @@ def RungeKutta4(X,t,dt,rateOfChangeFunction):
     ----------
     X - numpy.ndarray of shape (1,6) with three Cartesian positions and three velocities
         in an inertial reference frame in metres and metres per second, respectively.
-    t - float, epoch at which state X is defined
+    t - datetime, UTC epoch at which state X is defined
     dt - float, epoch increment to which the state X is to be propagated
     rateOfChangeFunction - function that returns a numpy.ndarray of shape (1,3)
         with three Cartesian components of the acceleration in m/s2 given in an
@@ -76,9 +79,9 @@ def RungeKutta4(X,t,dt,rateOfChangeFunction):
     """
     dxdt = rateOfChangeFunction(X,t)
     k0 = dt*dxdt
-    k1 = dt*rateOfChangeFunction(X+k0/2.,t+dt/2.)
-    k2 = dt*rateOfChangeFunction(X+k1/2.,t+dt/2.)
-    k3 = dt*rateOfChangeFunction(X+k2,t+dt)
+    k1 = dt*rateOfChangeFunction(X+k0/2., dt/2.) # t is a datetime, so just omit it here - we're integrating in (0, dt).
+    k2 = dt*rateOfChangeFunction(X+k1/2., dt/2.)
+    k3 = dt*rateOfChangeFunction(X+k2,dt)
     return X + (k0+2.*k1+2.*k2+k3)/6.
 
 """
@@ -95,7 +98,7 @@ def calculateGeocentricLatLon(stateVec, epoch):
     stateVec - numpy.ndarray of shape (1,6) with three Cartesian positions and
         three velocities in an inertial reference frame in metres and metres
         per second, respectively.
-    epoch - float with the UT epoch corresponding to the stateVect.
+    epoch - datetime with the UTC epoch corresponding to the stateVect.
     Returns
     ----------
     3-tuple of floats with geocentric latitude, longitude and radius in radians
@@ -111,7 +114,7 @@ def calculateGeocentricLatLon(stateVec, epoch):
     lon = math.atan( stateVec[1]/stateVec[0] )
     return colat,lon,r
 
-def calculateDragAcceleration(stateVec, ecpoh, satMass):
+def calculateDragAcceleration(stateVec, epoch, satMass):
     """ Calculate the acceleration due to atmospheric draf acting on the
     satellite at a given state (3 positions and 3 velocities) and epoch.
     Use NRLMSISE2000 atmospheric model with globally defined solar activity
@@ -126,8 +129,8 @@ def calculateDragAcceleration(stateVec, ecpoh, satMass):
     numpy.ndarray of shape (1,6) with three Cartesian positions and three
         velocities in an inertial reference frame in metres and metres per
             second, respectively.
-    epoch - float corresponding to the epoch at which the rate of change is
-        to be computed.
+    epoch - datetime corresponding to the UTC epoch at which the rate of change
+        is to be computed.
     Returns
     ----------
     numpy.ndarray of shape (1,3) with three Cartesian components of the
@@ -158,8 +161,8 @@ def calculateGravityAcceleration(stateVec, epoch, useGeoid):
     numpy.ndarray of shape (1,6) with three Cartesian positions and three
         velocities in an inertial reference frame in metres and metres per
             second, respectively.
-    epoch - float corresponding to the epoch at which the rate of change is
-        to be computed.
+    epoch - datetime corresponding to the UTC epoch at which the rate of change
+        is to be computed.
     useGeoid - bool, whether to compute the gravity by using EGM geopotential
         expansion (True) or a restricted two-body problem (False).
     Returns
@@ -201,8 +204,8 @@ def computeRateOfChangeOfState(stateVector, epoch):
     ----------
     stateVector - numpy.ndarray of shape (1,6) with three Cartesian positions
         and three velocities given in an inertial frame of reference.
-    epoch - float corresponding to the epoch at which the rate of change is
-        to be computed.
+    epoch - detetime corresponding to the UTC epoch at which the rate of change
+        is to be computed.
     Returns
     ----------
     numpy.ndarray of shape (1,6) with the rates of change of position and velocity
@@ -277,6 +280,7 @@ dragArea = 5.0 # Area exposed to atmospheric drag, m2.
 " Initial state of the satellite. "
 state_0 = numpy.array([EarthRadius+500.0e3,0.,0.,0.,0.,0.]) # Initial state vector with Cartesian positions and velocities in m and m/s.
 state_0[5] = numpy.sqrt( GM/numpy.linalg.norm(state_0[:3]) ) # Simple initial condition for test purposes: a circular orbit with velocity pointing along the +Z direction.
+epoch_0 = datetime(2017, 9, 27, 12, 22, 0)
 initialOrbitalPeriod = calculateCircularPeriod(state_0) # Orbital period of the initial circular orbit.
 
 ######## Initial gravity acceleration - redundant because will be re-computed in computeRateOfChangeOfState?
@@ -301,18 +305,19 @@ initialOrbitalPeriod = calculateCircularPeriod(state_0) # Orbital period of the 
 
 " Propagation time settings. "
 INTEGRATION_TIME_STEP_S = 10.0 # Time step at which the trajectory will be propagated.
-epochsOfInterest = numpy.arange(0, 2*initialOrbitalPeriod, INTEGRATION_TIME_STEP_S) # Times at which the solution is to be computed. Same unit as the time unit of the accelerations and velocities (seconds).
-propagatedStates = numpy.zeros( (epochsOfInterest.shape[0],6) ) # State vectors at the  epochs of interest.
+epochsOfInterest = pd.date_range(start=epoch_0, end=epoch_0+timedelta(seconds=2*initialOrbitalPeriod),
+              freq=pd.DateOffset(seconds=INTEGRATION_TIME_STEP_S)).to_pydatetime().tolist()
+propagatedStates = numpy.zeros( (len(epochsOfInterest),6) ) # State vectors at the  epochs of interest.
 
 " Actual numerical propagation main loop. "
 propagatedStates[0,:] = state_0 # Apply the initial condition.
-for i in range(1,epochsOfInterest.shape[0]): # Propagate the state to all the desired epochs statring from state_0.
+for i in range(1, len(epochsOfInterest)): # Propagate the state to all the desired epochs statring from state_0.
     propagatedStates[i,:] = RungeKutta4(propagatedStates[i-1], epochsOfInterest[i-1],
                                         INTEGRATION_TIME_STEP_S, computeRateOfChangeOfState)
     #TODO check if altitude isn't too low.
     
 " Compute quantities derived from the propagated state vectors. "
-altitudes = [ (numpy.linalg.norm(x[:3])-EarthRadius) for x in propagatedStates] # Altitudes above spherical Earth...
+altitudes = numpy.linalg.norm(propagatedStates[:,:3], axis=1) - EarthRadius # Altitudes above spherical Earth...
 specificEnergies = [ numpy.linalg.norm(x[3:])*numpy.linalg.norm(x[3:]) -
                     GM*satelliteMass/numpy.linalg.norm(x[:3]) for x in propagatedStates] # ...and corresponding specific orbital energies.
 
