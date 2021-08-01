@@ -57,7 +57,8 @@ def readEGM96Coefficients():
         Scoeffs[degrees[i]].append( ScoeffsTemp[i] )
         
     return Ccoeffs, Scoeffs
-        
+
+#TODO RK4 causes some numerical oscillation and dissipation in progapation, even in two-body problem. Need something better.
 def RungeKutta4(X, t, dt, rateOfChangeFunction):
     """ Use fourth-order Runge-Kutta numericla integration method to propagate
     a system of differential equations from state X, expressed at time t, by a
@@ -81,7 +82,7 @@ def RungeKutta4(X, t, dt, rateOfChangeFunction):
     dxdt = rateOfChangeFunction(X,t)
     k0 = dt*dxdt
     k1 = dt*rateOfChangeFunction(X+k0/2., dt/2.) # t is a datetime, so just omit it here - we're integrating in (0, dt).
-    k2 = dt*rateOfChangeFunction(X+k1/2., dt/2.)
+    k2 = dt*rateOfChangeFunction(X+k1/2., dt/2.) #TODO can't mix datetime t and float dt here, it'll make the propagator break when trying to compute Earth orentation or something...
     k3 = dt*rateOfChangeFunction(X+k2,dt)
     return X + (k0+2.*k1+2.*k2+k3)/6.
 
@@ -171,12 +172,12 @@ def calculateGravityAcceleration(stateVec, epoch, useGeoid):
     numpy.ndarray of shape (1,3) with three Cartesian components of the
         acceleration in m/s2 given in an inertial reference frame.
     """
-    r = numpy.linalg.norm(stateVec[:3]) # Distance to Earth's centre a.k.a. the radius.
     if useGeoid:
-        " Compute geocentric latitude and longitude. "
-        colatitude,longitude,geocentricRadius = calculateGeocentricLatLon(stateVec, epoch)
+        " Compute geocentric co-latitude, longitude & radius. "
+        colatitude,longitude,r = calculateGeocentricLatLon(stateVec, epoch)
 
         " Find the gravitational potential at the desired point. "
+        # See Eq. 1 in Cunningham (1996) for the general form of the geopotential expansion.
         gravitationalPotential = 0.0 # Potential of the gravitational field at the stateVec location.
         for degree in range(0, MAX_DEGREE+1): # Go through all the desired orders and compute the geoid corrections to the sphere.
             temp = 0. # Contribution to the potential from the current degree and all corresponding orders.
@@ -189,13 +190,14 @@ def calculateGravityAcceleration(stateVec, epoch, useGeoid):
 
             gravitationalPotential += math.pow(EarthRadius/r, degree) * temp # Add the contribution from the current degree.
 
-        gravitationalPotential *= GM/EarthRadius # Final correction.
+        gravitationalPotential *= GM/r # Final correction (*GM for acceleration, /r to get r^(n+1) in the denominator).
 
         " Compute the acceleration due to the gravity potential at the given point. "
         # stateVec is defined w.r.t. Earth's centre of mass, so no need to account
         # for the geoid shape here.
         gravityAcceleration = gravitationalPotential/r* (-1.*stateVec[:3]/r) # First divide by the radius to get the acceleration value, then get the direction (towards centre of the Earth).
     else:
+        r = numpy.linalg.norm(stateVec[:3]) # Earth-centred radius.
         gravityAcceleration = GM/(r*r) * (-1.*stateVec[:3]/r) # First compute the magnitude, then get the direction (towards centre of the Earth).
 
     return gravityAcceleration
@@ -247,7 +249,7 @@ def calculateCircularPeriod(stateVec):
 " Gravity model settings. "
 
 EarthRadius = 6378136.3 # Earth's equatorial radius from EGM96, m.
-MAX_DEGREE = 1 # Maximum degree of the geopotential harmocic expansion to use.
+MAX_DEGREE = 2 # Maximum degree of the geopotential harmocic expansion to use. 0 equates to two-body problem.
 USE_GEOID = True # Whether to account for Earth's geoid (True) or assume two-body problem (False).
 USE_DRAG = False # Whether to account for drag acceleration (True), or ignore it (False).
 Ccoeffs, Scoeffs = readEGM96Coefficients() # Get the gravitational potential exampnsion coefficients.
