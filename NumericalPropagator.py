@@ -12,6 +12,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import nrlmsise_00_header, nrlmsise_00
 from utilities import GM, Arrow3D
+import pytz
 
 def readEGM96Coefficients():
     """ Read the EGM96 gravitational field model coefficients from EGM96coefficients
@@ -64,6 +65,7 @@ def RungeKutta4(X, t, dt, rateOfChangeFunction):
     a system of differential equations from state X, expressed at time t, by a
     time increment dt. Evolution of the sytstem is given by the rateOfChangeFunction
     that gives the rates of change of all the components of state X.
+    
     Arguments
     ----------
     X - numpy.ndarray of shape (1,6) with three Cartesian positions and three velocities
@@ -73,6 +75,7 @@ def RungeKutta4(X, t, dt, rateOfChangeFunction):
     rateOfChangeFunction - function that returns a numpy.ndarray of shape (1,3)
         with three Cartesian components of the acceleration in m/s2 given in an
         inertial reference frame. Its arguments are the state X and epoch t.
+    
     Returns
     ----------
     numpy.ndarray of shape (1,6) with three Cartesian positions and three velocities
@@ -95,29 +98,32 @@ def calculateGeocentricLatLon(stateVec, epoch):
     """ Calculate the geocentric co-latitude (measured from the noth pole not
     equator), longitude and radius corresponding to the state vector given in
     inertial frame at a certain epoch.
+    
     Arguments
     ----------
     stateVec - numpy.ndarray of shape (1,6) with three Cartesian positions and
         three velocities in an inertial reference frame in metres and metres
         per second, respectively.
     epoch - datetime with the UTC epoch corresponding to the stateVect.
+    
     Returns
     ----------
     3-tuple of floats with geocentric latitude, longitude and radius in radians
         and distance units of stateVec.
+        
     References
     ----------
     Conversions taken from:
     http://agamenon.tsc.uah.es/Asignaturas/it/rd/apuntes/RxControl_Manual.pdf
     """
-    #TODO need to change to Earth-fixed frame to compute the gravity acceleration, then back to inertial
+    #TODO need to change to Earth-fixed frame to compute the gravity acceleration
     r = numpy.linalg.norm(stateVec[:3])
     colat = math.pi/2.0 - stateVec[2]/r
     lon = math.atan( stateVec[1]/stateVec[0] )
     return colat,lon,r
 
 def calculateDragAcceleration(stateVec, epoch, satMass):
-    """ Calculate the acceleration due to atmospheric draf acting on the
+    """ Calculate the acceleration due to atmospheric drag acting on the
     satellite at a given state (3 positions and 3 velocities) and epoch.
     Use NRLMSISE2000 atmospheric model with globally defined solar activity
     proxies:
@@ -133,6 +139,7 @@ def calculateDragAcceleration(stateVec, epoch, satMass):
             second, respectively.
     epoch - datetime corresponding to the UTC epoch at which the rate of change
         is to be computed.
+    
     Returns
     ----------
     numpy.ndarray of shape (1,3) with three Cartesian components of the
@@ -241,11 +248,7 @@ def calculateCircularPeriod(stateVec):
     """
     return 2*math.pi*numpy.sqrt(math.pow(numpy.linalg.norm(stateVec[:3]),3)/GM)
 
-"""
-===============================================================================
-    FORCE MODEL SETTINGS.
-===============================================================================
-"""
+#%% FORCE MODEL SETTINGS.
 " Gravity model settings. "
 
 EarthRadius = 6378136.3 # Earth's equatorial radius from EGM96, m.
@@ -271,11 +274,7 @@ F10_7A = 70 # 81-day average F10.7.
 F10_7 = 180 # Daily F10.7 for the previous day.
 MagneticIndex = 40 # Daily magnetic index.
 
-"""
-===============================================================================
-    PROPAGATE THE ORBIT NUMERICALLY.
-===============================================================================
-"""
+#%% PROPAGATE THE ORBIT NUMERICALLY.
 " Initial properties of the satellite. "
 satelliteMass = 1000. # kg
 Cd = 2.2 # Drag coefficient, dimensionless.
@@ -284,7 +283,7 @@ dragArea = 5.0 # Area exposed to atmospheric drag, m2.
 " Initial state of the satellite. "
 state_0 = numpy.array([EarthRadius+500.0e3,0.,0.,0.,0.,0.]) # Initial state vector with Cartesian positions and velocities in m and m/s.
 state_0[5] = numpy.sqrt( GM/numpy.linalg.norm(state_0[:3]) ) # Simple initial condition for test purposes: a circular orbit with velocity pointing along the +Z direction.
-epoch_0 = datetime(2017, 9, 27, 12, 22, 0)
+epoch_0 = datetime(2017, 9, 27, 12, 22, 0, 200, tzinfo=pytz.UTC)
 initialOrbitalPeriod = calculateCircularPeriod(state_0) # Orbital period of the initial circular orbit.
 
 ######## Initial gravity acceleration - redundant because will be re-computed in computeRateOfChangeOfState?
@@ -309,10 +308,15 @@ initialOrbitalPeriod = calculateCircularPeriod(state_0) # Orbital period of the 
 
 " Propagation time settings. "
 INTEGRATION_TIME_STEP_S = 10.0 # Time step at which the trajectory will be propagated.
-epochsOfInterest = pd.date_range(start=epoch_0, end=epoch_0+timedelta(seconds=2*initialOrbitalPeriod),
-              freq=pd.DateOffset(seconds=INTEGRATION_TIME_STEP_S)).to_pydatetime().tolist()
+NO_ORBITS = 20 # For how manyu orbits to propagate.
+
+epochsOfInterest = pd.date_range(start=epoch_0,
+                                 end=epoch_0+timedelta(seconds=NO_ORBITS*initialOrbitalPeriod),
+                                 freq=pd.DateOffset(seconds=INTEGRATION_TIME_STEP_S)
+                                 ).to_pydatetime().tolist()
+
 propagatedStates = numpy.zeros( (len(epochsOfInterest),6) ) # State vectors at the  epochs of interest.
-propagatedStates2Body = numpy.zeros( (len(epochsOfInterest),6) )
+propagatedStates2Body = numpy.zeros( (len(epochsOfInterest),6) ) # W/o geoid, i.e. two-body acceleration for comparison.
 
 " Actual numerical propagation main loop. "
 propagatedStates[0,:] = state_0 # Apply the initial condition.
@@ -335,11 +339,7 @@ specificEnergies = [ numpy.linalg.norm(x[3:])*numpy.linalg.norm(x[3:]) -
 
 altitudes2Body = numpy.linalg.norm(propagatedStates2Body[:,:3], axis=1) - EarthRadius
 
-"""
-===============================================================================
-    PLOT FORMATTING.
-===============================================================================
-"""
+#%% PLOT FORMATTING.
 ticksFontSize = 15
 labelsFontSize = 30
 titleFontSize = 34
@@ -347,11 +347,7 @@ titleFontSize = 34
 matplotlib.rc('xtick', labelsize=ticksFontSize) 
 matplotlib.rc('ytick', labelsize=ticksFontSize)
 
-"""
-===============================================================================
-    FIGURE THAT SHOWS THE EARTH AND SATELLITE TRAJECTORY.
-===============================================================================
-"""
+#%% FIGURE THAT SHOWS THE EARTH AND SATELLITE TRAJECTORY.
 fig = matplotlib.pyplot.figure(figsize=(12,8))
 ax = Axes3D(fig)
 ax.set_aspect('auto') #TODO change 3D axes aspect ratio to equal, which isn't supported now. Current workaround is set scale_xyz below.
@@ -385,11 +381,7 @@ ax.plot(propagatedStates2Body[:,0],propagatedStates2Body[:,1],propagatedStates2B
 
 fig.show()
 
-"""
-===============================================================================
-    FIGURE THAT SHOWS THE ALTITUDE AND ORBITAL ENERGY EVOLUTION.
-===============================================================================
-"""
+#%% FIGURE THAT SHOWS THE ALTITUDE AND ORBITAL ENERGY EVOLUTION.
 fig2 = matplotlib.pyplot.figure(figsize=(12,8))
 ax2=fig2.gca()
 ax2_2 = ax2.twinx();
@@ -404,11 +396,7 @@ ax2_2.plot(epochsOfInterest, specificEnergies, c='m', lw=2, ls='-')
 
 fig2.show()
 
-"""
-===============================================================================
-    FIGURE SHOWING EVOLUTION OF THE POSITION COMPONENTS OVER TIME.
-===============================================================================
-"""
+#%% FIGURE SHOWING EVOLUTION OF THE POSITION COMPONENTS OVER TIME.
 fig3, axarr = matplotlib.pyplot.subplots(3, sharex=True, figsize=(12,8))
 axarr[0].grid(linewidth=2); axarr[1].grid(linewidth=2); axarr[2].grid(linewidth=2);
 axarr[0].tick_params(axis='both',reset=False,which='both',length=5,width=1.5)
