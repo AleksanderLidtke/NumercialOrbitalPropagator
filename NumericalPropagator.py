@@ -13,6 +13,9 @@ from datetime import datetime, timedelta
 import nrlmsise_00_header, nrlmsise_00
 from utilities import GM, Arrow3D
 import pytz
+from astropy import coordinates as coord
+from astropy import units as u
+from astropy.time import Time
 
 def readEGM96Coefficients():
     """ Read the EGM96 gravitational field model coefficients from EGM96coefficients
@@ -71,7 +74,7 @@ def RungeKutta4(X, t, dt, rateOfChangeFunction):
     X - numpy.ndarray of shape (1,6) with three Cartesian positions and three velocities
         in an inertial reference frame in metres and metres per second, respectively.
     t - datetime, UTC epoch at which state X is defined
-    dt - float, epoch increment to which the state X is to be propagated
+    dt - float, epoch increment to which the state X is to be propagated in seconds.
     rateOfChangeFunction - function that returns a numpy.ndarray of shape (1,3)
         with three Cartesian components of the acceleration in m/s2 given in an
         inertial reference frame. Its arguments are the state X and epoch t.
@@ -82,11 +85,11 @@ def RungeKutta4(X, t, dt, rateOfChangeFunction):
         in an inertial reference frame in metres and metres per second, respectively,
         propagated to time t+dt.
     """
-    dxdt = rateOfChangeFunction(X,t)
+    dxdt = rateOfChangeFunction(X, t)
     k0 = dt*dxdt
-    k1 = dt*rateOfChangeFunction(X+k0/2., dt/2.) # t is a datetime, so just omit it here - we're integrating in (0, dt).
-    k2 = dt*rateOfChangeFunction(X+k1/2., dt/2.) #TODO can't mix datetime t and float dt here, it'll make the propagator break when trying to compute Earth orentation or something...
-    k3 = dt*rateOfChangeFunction(X+k2,dt)
+    k1 = dt*rateOfChangeFunction(X+k0/2., t+timedelta(seconds=dt/2.))
+    k2 = dt*rateOfChangeFunction(X+k1/2., t+timedelta(seconds=dt/2.))
+    k3 = dt*rateOfChangeFunction(X+k2, t+timedelta(seconds=dt))
     return X + (k0+2.*k1+2.*k2+k3)/6.
 
 """
@@ -116,11 +119,25 @@ def calculateGeocentricLatLon(stateVec, epoch):
     Conversions taken from:
     http://agamenon.tsc.uah.es/Asignaturas/it/rd/apuntes/RxControl_Manual.pdf
     """
-    #TODO need to change to Earth-fixed frame to compute the gravity acceleration
+    # Get the state vector and epoch in astropy's formats.
+    epochAstro = Time(epoch, scale='utc', format='datetime')
+    stateVecAstro = coord.CartesianRepresentation(x=stateVec[0], y=stateVec[1],
+                                             z=stateVec[2], unit=u.m)
+    
+    # Convert from the inertial reference frame (assume GCRS, which is practically
+    # the same as J2000) to Earth-fixed ITRS.
+    stateVec_GCRS = coord.GCRS(stateVecAstro, obstime=epochAstro)
+
+    stateVec_ITRS = stateVec_GCRS.transform_to(coord.ITRS(obstime=epochAstro))
+
+    loc = coord.EarthLocation.from_geocentric(*stateVec_ITRS.cartesian.xyz, unit=u.m)
+
+    # Compute the gravity acceleration in Earth-fixed frame.
     r = numpy.linalg.norm(stateVec[:3])
-    colat = math.pi/2.0 - stateVec[2]/r
-    lon = math.atan( stateVec[1]/stateVec[0] )
-    return colat,lon,r
+    colat = math.pi/2.0 - loc.lat.to_value(u.rad)
+    lon = loc.lon.to_value(u.rad)
+    
+    return colat, lon, r
 
 def calculateDragAcceleration(stateVec, epoch, satMass):
     """ Calculate the acceleration due to atmospheric drag acting on the
@@ -146,7 +163,7 @@ def calculateDragAcceleration(stateVec, epoch, satMass):
         acceleration in m/s2 given in an inertial reference frame.
     """
     #    " Prepare the atmospheric density model inputs. "
-#    #TODO - calculate the altitude, latitude, longitude
+#    #TODO - calculate the altitude, latitude, longitude in drag calculation
     altitude_km = numpy.linalg.norm(stateVec[:3])/1000.0 #TODO this isn't altitude in km, but radius in km. Is this OK?
 
     NRLMSISEinput = nrlmsise_00_header.nrlmsise_input(year=0, doy=0, sec=0.0, #TODO should account for the actual epoch in drag calculation...
@@ -165,6 +182,7 @@ def calculateGravityAcceleration(stateVec, epoch, useGeoid):
     """ Calculate the acceleration due to gravtiy acting on the satellite at
     a given state (3 positions and 3 velocities). Ignore satellite's mass,
     i.e. use a restricted two-body problem.
+    
     Arguments
     ----------
     numpy.ndarray of shape (1,6) with three Cartesian positions and three
@@ -174,6 +192,7 @@ def calculateGravityAcceleration(stateVec, epoch, useGeoid):
         is to be computed.
     useGeoid - bool, whether to compute the gravity by using EGM geopotential
         expansion (True) or a restricted two-body problem (False).
+    
     Returns
     ----------
     numpy.ndarray of shape (1,3) with three Cartesian components of the
@@ -211,12 +230,14 @@ def calculateGravityAcceleration(stateVec, epoch, useGeoid):
     
 def computeRateOfChangeOfState(stateVector, epoch):
     """ Compute the rate of change of the state vector.
+    
     Arguments
     ----------
     stateVector - numpy.ndarray of shape (1,6) with three Cartesian positions
         and three velocities given in an inertial frame of reference.
     epoch - detetime corresponding to the UTC epoch at which the rate of change
         is to be computed.
+        
     Returns
     ----------
     numpy.ndarray of shape (1,6) with the rates of change of position and velocity
@@ -237,10 +258,12 @@ def computeRateOfChangeOfState(stateVector, epoch):
 def calculateCircularPeriod(stateVec):
     """ Calculate the orbital period of a circular, Keplerian orbit passing through
     the state vector (3 positions and velocities).
+    
     Arguments
     ----------
     numpy.ndarray of shape (1,3) with three Cartesian positions and velocities,
         in mtres and m/s, respectively.
+    
     Returns
     ----------
     Orbital period of a circular orbit corresponding to the supplied state vector
@@ -259,7 +282,7 @@ Ccoeffs, Scoeffs = readEGM96Coefficients() # Get the gravitational potential exa
 
 " Atmospheric density model settings. "
 NRLMSISEflags = nrlmsise_00_header.nrlmsise_flags()
-NRLMSISEaph = nrlmsise_00_header.ap_array() #TODO this should contain the following:
+NRLMSISEaph = nrlmsise_00_header.ap_array() #TODO NRLMSISE header should contain the following:
 # * Array containing the following magnetic values:
 # *   0 : daily AP
 # *   1 : 3 hr AP index for current time
@@ -323,13 +346,13 @@ propagatedStates[0,:] = state_0 # Apply the initial condition.
 for i in range(1, len(epochsOfInterest)): # Propagate the state to all the desired epochs statring from state_0.
     propagatedStates[i,:] = RungeKutta4(propagatedStates[i-1], epochsOfInterest[i-1],
                                         INTEGRATION_TIME_STEP_S, computeRateOfChangeOfState)
-    #TODO check if altitude isn't too low.
+    #TODO check if altitude isn't too low during propagation.
 
 # Propagate with two-body for comparison.
 USE_GEOID = False
 propagatedStates2Body[0,:] = state_0 # Apply the initial condition.
 for i in range(1, len(epochsOfInterest)): # Propagate the state to all the desired epochs statring from state_0.
-    propagatedStates2Body[i,:] = RungeKutta4(propagatedStates2Body[i-1], propagatedStates2Body[i-1],
+    propagatedStates2Body[i,:] = RungeKutta4(propagatedStates2Body[i-1], epochsOfInterest[i-1],
                                         INTEGRATION_TIME_STEP_S, computeRateOfChangeOfState)
 
 " Compute quantities derived from the propagated state vectors. "
